@@ -1,0 +1,259 @@
+// Transfer Circuit for the 0BTC Wire system
+use plonky2::field::types::Field;
+use plonky2::iop::target::Target;
+use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::plonk::circuit_data::CircuitData;
+use plonky2::plonk::config::GenericConfig;
+
+use crate::core::{C, D, F, PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
+use crate::gadgets::{calculate_and_register_nullifier, enforce_fee_payment, sum, verify_message_signature};
+
+/// Circuit for transferring assets between UTXOs
+///
+/// This circuit verifies ownership of input UTXOs, ensures conservation of value,
+/// handles fee payment, and creates output UTXOs for recipients and change.
+pub struct TransferCircuit {
+    /// The input UTXOs to spend
+    pub input_utxos: Vec<UTXOTarget>,
+    
+    /// The recipient public key hashes
+    pub recipient_pk_hashes: Vec<Vec<Target>>,
+    
+    /// The output amounts for each recipient
+    pub output_amounts: Vec<Target>,
+    
+    /// The sender's public key
+    pub sender_pk: PublicKeyTarget,
+    
+    /// The sender's signature
+    pub sender_sig: SignatureTarget,
+    
+    /// The fee input UTXO (must be wBTC)
+    pub fee_input_utxo: UTXOTarget,
+    
+    /// The fee amount
+    pub fee_amount: Target,
+    
+    /// The fee reservoir address hash
+    pub fee_reservoir_address_hash: Vec<Target>,
+}
+
+impl TransferCircuit {
+    /// Build the transfer circuit
+    pub fn build<F: Field, C: GenericConfig<D, F = F>, const D: usize>(
+        &self,
+        builder: &mut CircuitBuilder<F, D>,
+        sender_sk: Target,
+    ) -> (Vec<UTXOTarget>, UTXOTarget, Option<UTXOTarget>) {
+        // Verify the sender's signature over the transfer details
+        let mut message = Vec::new();
+        
+        // Include recipient details in the message
+        for recipient_pk_hash in &self.recipient_pk_hashes {
+            message.extend_from_slice(recipient_pk_hash);
+        }
+        
+        // Include output amounts in the message
+        for &amount in &self.output_amounts {
+            message.push(amount);
+        }
+        
+        // Include asset ID in the message (assuming all inputs have the same asset ID)
+        message.extend_from_slice(&self.input_utxos[0].asset_id_target);
+        
+        // Include a nonce in the message (could be a timestamp or random value)
+        let nonce = builder.add_virtual_target();
+        message.push(nonce);
+        
+        // Verify the signature
+        let is_signature_valid = verify_message_signature(
+            builder,
+            &message,
+            &self.sender_sig,
+            &self.sender_pk,
+        );
+        
+        // Ensure the signature is valid
+        builder.assert_one(is_signature_valid);
+        
+        // Calculate and register nullifiers for all input UTXOs
+        for input_utxo in &self.input_utxos {
+            calculate_and_register_nullifier(
+                builder,
+                &input_utxo.salt_target,
+                sender_sk,
+            );
+        }
+        
+        // Sum input amounts
+        let input_amounts: Vec<Target> = self.input_utxos
+            .iter()
+            .map(|utxo| utxo.amount_target)
+            .collect();
+        let input_sum = sum(builder, &input_amounts);
+        
+        // Sum output amounts
+        let output_sum = sum(builder, &self.output_amounts);
+        
+        // Verify conservation of value: input_sum >= output_sum
+        let is_conserved = crate::gadgets::is_less_than_or_equal(
+            builder,
+            output_sum,
+            input_sum,
+        );
+        builder.assert_one(is_conserved);
+        
+        // Handle fee payment
+        let wbtc_change_amount = enforce_fee_payment(
+            builder,
+            &self.sender_pk,
+            &self.fee_input_utxo,
+            self.fee_amount,
+            &self.fee_reservoir_address_hash,
+            &self.sender_sig,
+        );
+        
+        // Calculate primary asset change
+        let primary_change = builder.sub(input_sum, output_sum);
+        
+        // Create output UTXOs for recipients
+        let mut output_utxos = Vec::new();
+        for i in 0..self.recipient_pk_hashes.len() {
+            let output_utxo = UTXOTarget::add_virtual(builder, self.input_utxos[0].asset_id_target.len());
+            
+            // Set the owner to the recipient
+            for (a, b) in output_utxo.owner_pubkey_hash_target.iter().zip(self.recipient_pk_hashes[i].iter()) {
+                builder.connect(*a, *b);
+            }
+            
+            // Set the asset ID to the same as the input
+            for (a, b) in output_utxo.asset_id_target.iter().zip(self.input_utxos[0].asset_id_target.iter()) {
+                builder.connect(*a, *b);
+            }
+            
+            // Set the amount
+            builder.connect(output_utxo.amount_target, self.output_amounts[i]);
+            
+            // The salt is a random value, so we don't need to connect it
+            
+            output_utxos.push(output_utxo);
+        }
+        
+        // Create a change UTXO for the primary asset if needed
+        let primary_change_utxo = if builder.is_zero(primary_change) {
+            None
+        } else {
+            let change_utxo = UTXOTarget::add_virtual(builder, self.input_utxos[0].asset_id_target.len());
+            
+            // Set the owner to the sender
+            for (a, b) in change_utxo.owner_pubkey_hash_target.iter().zip(self.input_utxos[0].owner_pubkey_hash_target.iter()) {
+                builder.connect(*a, *b);
+            }
+            
+            // Set the asset ID to the same as the input
+            for (a, b) in change_utxo.asset_id_target.iter().zip(self.input_utxos[0].asset_id_target.iter()) {
+                builder.connect(*a, *b);
+            }
+            
+            // Set the amount to the change
+            builder.connect(change_utxo.amount_target, primary_change);
+            
+            // The salt is a random value, so we don't need to connect it
+            
+            Some(change_utxo)
+        };
+        
+        // Create a fee UTXO for the reservoir
+        let fee_utxo = UTXOTarget::add_virtual(builder, self.fee_input_utxo.asset_id_target.len());
+        
+        // Set the owner to the fee reservoir
+        for (a, b) in fee_utxo.owner_pubkey_hash_target.iter().zip(self.fee_reservoir_address_hash.iter()) {
+            builder.connect(*a, *b);
+        }
+        
+        // Set the asset ID to wBTC (same as fee input)
+        for (a, b) in fee_utxo.asset_id_target.iter().zip(self.fee_input_utxo.asset_id_target.iter()) {
+            builder.connect(*a, *b);
+        }
+        
+        // Set the amount to the fee
+        builder.connect(fee_utxo.amount_target, self.fee_amount);
+        
+        // Return the output UTXOs, fee UTXO, and optional change UTXO
+        (output_utxos, fee_utxo, primary_change_utxo)
+    }
+    
+    /// Create and build the circuit
+    pub fn create_circuit() -> CircuitData<F, C, D> {
+        let config = plonky2::plonk::circuit_data::CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create a dummy circuit for now
+        // In a real implementation, this would be parameterized
+        let input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
+        let input_utxos = vec![input_utxo];
+        
+        let recipient_pk_hash: Vec<Target> = (0..32)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        let recipient_pk_hashes = vec![recipient_pk_hash];
+        
+        let output_amount = builder.add_virtual_target();
+        let output_amounts = vec![output_amount];
+        
+        let sender_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let sender_sig = SignatureTarget::add_virtual(&mut builder);
+        
+        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
+        
+        let fee_amount = builder.constant(F::from_canonical_u64(DEFAULT_FEE));
+        
+        let fee_reservoir_address_hash: Vec<Target> = (0..32)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        let circuit = TransferCircuit {
+            input_utxos,
+            recipient_pk_hashes,
+            output_amounts,
+            sender_pk,
+            sender_sig,
+            fee_input_utxo,
+            fee_amount,
+            fee_reservoir_address_hash,
+        };
+        
+        // Add a virtual target for the sender's secret key
+        let sender_sk = builder.add_virtual_target();
+        
+        // Build the circuit
+        circuit.build(&mut builder, sender_sk);
+        
+        builder.build::<C>()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::PointTarget;
+    use plonky2::iop::witness::PartialWitness;
+    
+    #[test]
+    fn test_transfer() {
+        // Create the circuit
+        let circuit_data = TransferCircuit::create_circuit();
+        
+        // Create a witness
+        let mut pw = PartialWitness::new();
+        
+        // In a real test, we would set the witness values
+        // For now, we'll just create an empty witness
+        
+        // Generate the proof
+        let proof = circuit_data.prove(pw).unwrap();
+        
+        // Verify the proof
+        circuit_data.verify(proof).unwrap();
+    }
+}
