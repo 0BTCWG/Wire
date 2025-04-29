@@ -1,16 +1,20 @@
 // Wrapped Asset Mint Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
+use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::field::goldilocks_field::GoldilocksField;
-
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
+use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
 use crate::gadgets::verify_message_signature;
 
 /// Represents a signed attestation from a custodian
+#[derive(Clone)]
 pub struct SignedAttestationTarget {
     /// The recipient's public key hash
     pub recipient_pk_hash: Vec<Target>,
@@ -29,6 +33,7 @@ pub struct SignedAttestationTarget {
 ///
 /// This circuit verifies a custodian's attestation that BTC has been deposited
 /// and mints the corresponding amount of wBTC to the recipient.
+#[derive(Clone)]
 pub struct WrappedAssetMintCircuit {
     /// The custodian's public key
     pub custodian_pk: PublicKeyTarget,
@@ -56,39 +61,31 @@ impl WrappedAssetMintCircuit {
             &self.custodian_pk,
         );
         
-        // Assert that the signature is valid
-        let one = builder.one();
-        builder.connect(is_valid, one);
+        // Ensure the signature is valid
+        builder.assert_one(is_valid);
         
-        // Create an output UTXO for the recipient
+        // Create the output UTXO
+        let salt = builder.add_virtual_target();
+        
+        // Register the amount as a public input
+        builder.register_public_input(self.attestation.amount);
+        
+        // Create the output UTXO
         let output_utxo = UTXOTarget {
             owner_pubkey_hash_target: self.attestation.recipient_pk_hash.clone(),
             asset_id_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
+                .map(|i| {
+                    if i < WBTC_ASSET_ID.len() {
+                        builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64))
+                    } else {
+                        builder.zero()
+                    }
+                })
                 .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
+            amount_target: self.attestation.amount,
+            salt_target: vec![salt],
         };
         
-        // Set the owner public key hash
-        for (a, b) in self.attestation.recipient_pk_hash.iter().zip(output_utxo.owner_pubkey_hash_target.iter()) {
-            builder.connect(*a, *b);
-        }
-        
-        // Set the asset ID to wBTC (all zeros)
-        let zero_target = builder.zero();
-        for target in &output_utxo.asset_id_target {
-            builder.connect(*target, zero_target);
-        }
-        
-        // Set the amount
-        builder.connect(output_utxo.amount_target, self.attestation.amount);
-        
-        // The salt is a random value, so we don't need to connect it
-        
-        // Return the output UTXO
         output_utxo
     }
     
@@ -146,6 +143,106 @@ impl WrappedAssetMintCircuit {
         // Build the circuit data
         builder.build::<PoseidonGoldilocksConfig>()
     }
+    
+    /// Generate a proof for the circuit with the given inputs
+    pub fn generate_proof(
+        recipient_pk_hash: &[u8],
+        amount: u64,
+        deposit_nonce: u64,
+        custodian_pk_x: u64,
+        custodian_pk_y: u64,
+        signature_r_x: u64,
+        signature_r_y: u64,
+        signature_s: u64,
+    ) -> Result<SerializableProof, ProofError> {
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        
+        // Create a partial witness
+        let mut pw = PartialWitness::new();
+        
+        // Create a new circuit
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Create a custodian public key
+        let custodian_pk = PublicKeyTarget {
+            point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
+        
+        // Create a recipient public key hash
+        let recipient_pk_hash_targets: Vec<_> = (0..HASH_SIZE)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        // Create an amount to mint
+        let amount_target = builder.add_virtual_target();
+        
+        // Create a deposit nonce
+        let deposit_nonce_target = builder.add_virtual_target();
+        
+        // Create a signature
+        let signature = SignatureTarget {
+            r_point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
+        
+        // Create a signed attestation
+        let attestation = SignedAttestationTarget {
+            recipient_pk_hash: recipient_pk_hash_targets.clone(),
+            amount: amount_target,
+            deposit_nonce: deposit_nonce_target,
+            signature: signature.clone(),
+        };
+        
+        // Create the circuit
+        let circuit = WrappedAssetMintCircuit {
+            custodian_pk: custodian_pk.clone(),
+            attestation: attestation.clone(),
+        };
+        
+        // Set the witness values
+        pw.set_target(custodian_pk.point.x, GoldilocksField::from_canonical_u64(custodian_pk_x));
+        pw.set_target(custodian_pk.point.y, GoldilocksField::from_canonical_u64(custodian_pk_y));
+        
+        for i in 0..recipient_pk_hash.len().min(HASH_SIZE) {
+            pw.set_target(
+                attestation.recipient_pk_hash[i],
+                GoldilocksField::from_canonical_u64(recipient_pk_hash[i] as u64),
+            );
+        }
+        
+        pw.set_target(attestation.amount, GoldilocksField::from_canonical_u64(amount));
+        pw.set_target(attestation.deposit_nonce, GoldilocksField::from_canonical_u64(deposit_nonce));
+        
+        pw.set_target(signature.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
+        pw.set_target(signature.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
+        pw.set_target(signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
+        
+        // Generate the proof
+        let proof = generate_proof(&circuit_data, pw)?;
+        
+        // Serialize the proof
+        serialize_proof(&proof)
+    }
+    
+    /// Verify a proof for the circuit
+    pub fn verify_proof(serialized_proof: &SerializableProof) -> Result<(), ProofError> {
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        
+        // Deserialize the proof
+        let proof = crate::core::proof::deserialize_proof(serialized_proof)?;
+        
+        // Verify the proof
+        verify_proof(&circuit_data, &proof)
+    }
 }
 
 #[cfg(test)]
@@ -154,11 +251,10 @@ mod tests {
     
     #[test]
     fn test_wrapped_asset_mint() {
-        // Create the circuit
+        // This test verifies that we can create and build the circuit
         let circuit_data = WrappedAssetMintCircuit::create_circuit();
         
         // Just verify that the circuit was created successfully
-        // Skip proof generation and verification for now
         assert!(circuit_data.common.gates.len() > 0, "Circuit should have gates");
     }
 }

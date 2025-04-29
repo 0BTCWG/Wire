@@ -1,20 +1,24 @@
 // Transfer Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
+use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
+use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
+use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
 use crate::gadgets::{calculate_and_register_nullifier, enforce_fee_payment, sum, verify_message_signature};
 
 /// Circuit for transferring assets between UTXOs
 ///
 /// This circuit verifies ownership of input UTXOs, ensures conservation of value,
 /// handles fee payment, and creates output UTXOs for recipients and change.
+#[derive(Clone)]
 pub struct TransferCircuit {
     /// The input UTXOs to spend
     pub input_utxos: Vec<UTXOTarget>,
@@ -236,6 +240,199 @@ impl TransferCircuit {
         
         builder.build::<PoseidonGoldilocksConfig>()
     }
+    
+    /// Generate a proof for the transfer circuit
+    pub fn generate_proof(
+        &self,
+        input_utxos_data: Vec<(Vec<u8>, Vec<u8>, u64, Vec<u8>)>, // (owner_pubkey_hash, asset_id, amount, salt)
+        recipient_pk_hashes: Vec<Vec<u8>>,
+        output_amounts: Vec<u64>,
+        sender_sk: u64,
+        sender_pk_x: u64,
+        sender_pk_y: u64,
+        signature_r_x: u64,
+        signature_r_y: u64,
+        signature_s: u64,
+        fee_input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
+        fee_amount: u64,
+        fee_reservoir_address_hash: Vec<u8>,
+        nonce: u64,
+    ) -> Result<SerializableProof, ProofError> {
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        let mut pw = PartialWitness::new();
+        
+        // Create a new circuit builder for virtual targets
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Create input UTXOs
+        let mut input_utxos = Vec::new();
+        for (owner_pubkey_hash, asset_id, amount, salt) in &input_utxos_data {
+            let utxo = UTXOTarget::add_virtual(&mut builder, salt.len());
+            
+            // Set witness values for the UTXO
+            for (i, byte) in owner_pubkey_hash.iter().enumerate() {
+                if i < utxo.owner_pubkey_hash_target.len() {
+                    pw.set_target(
+                        utxo.owner_pubkey_hash_target[i],
+                        GoldilocksField::from_canonical_u64(*byte as u64),
+                    );
+                }
+            }
+            for (i, byte) in asset_id.iter().enumerate() {
+                if i < utxo.asset_id_target.len() {
+                    pw.set_target(
+                        utxo.asset_id_target[i],
+                        GoldilocksField::from_canonical_u64(*byte as u64),
+                    );
+                }
+            }
+            
+            pw.set_target(utxo.amount_target, GoldilocksField::from_canonical_u64(*amount as u64));
+            
+            for (i, byte) in salt.iter().enumerate() {
+                if i < utxo.salt_target.len() {
+                    pw.set_target(
+                        utxo.salt_target[i],
+                        GoldilocksField::from_canonical_u64(*byte as u64),
+                    );
+                }
+            }
+            input_utxos.push(utxo);
+        }
+        
+        // Create recipient public key hashes
+        let mut recipient_pk_hash_targets = Vec::new();
+        for pk_hash in &recipient_pk_hashes {
+            let pk_hash_targets: Vec<Target> = (0..pk_hash.len())
+                .map(|_| builder.add_virtual_target())
+                .collect();
+            
+            for (i, byte) in pk_hash.iter().enumerate() {
+                if i < pk_hash_targets.len() {
+                    pw.set_target(
+                        pk_hash_targets[i],
+                        GoldilocksField::from_canonical_u64(*byte as u64),
+                    );
+                }
+            }
+            recipient_pk_hash_targets.push(pk_hash_targets);
+        }
+        
+        // Create output amount targets
+        let output_amount_targets: Vec<Target> = (0..output_amounts.len())
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        for (i, &amount) in output_amounts.iter().enumerate() {
+            pw.set_target(
+                output_amount_targets[i],
+                GoldilocksField::from_canonical_u64(amount as u64),
+            );
+        }
+        
+        // Create sender's public key and signature
+        let sender_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let sender_sig = SignatureTarget::add_virtual(&mut builder);
+        
+        // Set witness values for the sender's public key
+        pw.set_target(sender_pk.point.x, GoldilocksField::from_canonical_u64(sender_pk_x as u64));
+        pw.set_target(sender_pk.point.y, GoldilocksField::from_canonical_u64(sender_pk_y as u64));
+        
+        // Set witness values for the sender's signature
+        pw.set_target(sender_sig.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x as u64));
+        pw.set_target(sender_sig.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y as u64));
+        pw.set_target(sender_sig.s_scalar, GoldilocksField::from_canonical_u64(signature_s as u64));
+        
+        // Create fee input UTXO
+        let (fee_owner_pubkey_hash, fee_asset_id, fee_amount_value, fee_salt) = &fee_input_utxo_data;
+        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, fee_salt.len());
+        
+        for (i, byte) in fee_owner_pubkey_hash.iter().enumerate() {
+            if i < fee_input_utxo.owner_pubkey_hash_target.len() {
+                pw.set_target(
+                    fee_input_utxo.owner_pubkey_hash_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        for (i, byte) in fee_asset_id.iter().enumerate() {
+            if i < fee_input_utxo.asset_id_target.len() {
+                pw.set_target(
+                    fee_input_utxo.asset_id_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        pw.set_target(fee_input_utxo.amount_target, GoldilocksField::from_canonical_u64(*fee_amount_value as u64));
+        
+        for (i, byte) in fee_salt.iter().enumerate() {
+            if i < fee_input_utxo.salt_target.len() {
+                pw.set_target(
+                    fee_input_utxo.salt_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Create fee amount target
+        let fee_amount_target = builder.add_virtual_target();
+        pw.set_target(fee_amount_target, GoldilocksField::from_canonical_u64(fee_amount as u64));
+        
+        // Create fee reservoir address hash
+        let fee_reservoir_address_hash_targets: Vec<Target> = (0..fee_reservoir_address_hash.len())
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        for (i, byte) in fee_reservoir_address_hash.iter().enumerate() {
+            if i < fee_reservoir_address_hash_targets.len() {
+                pw.set_target(
+                    fee_reservoir_address_hash_targets[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Create the circuit
+        let _circuit = TransferCircuit {
+            input_utxos,
+            recipient_pk_hashes: recipient_pk_hash_targets,
+            output_amounts: output_amount_targets,
+            sender_pk,
+            sender_sig,
+            fee_input_utxo,
+            fee_amount: fee_amount_target,
+            fee_reservoir_address_hash: fee_reservoir_address_hash_targets,
+        };
+        
+        // Add a virtual target for the sender's secret key
+        let sender_sk_target = builder.add_virtual_target();
+        pw.set_target(sender_sk_target, GoldilocksField::from_canonical_u64(sender_sk as u64));
+        
+        // Add a virtual target for the nonce
+        let nonce_target = builder.add_virtual_target();
+        pw.set_target(nonce_target, GoldilocksField::from_canonical_u64(nonce as u64));
+        
+        // Generate the proof
+        let proof = generate_proof(&circuit_data, pw)?;
+        
+        // Serialize the proof
+        serialize_proof(&proof)
+    }
+    
+    /// Verify a proof for the circuit
+    pub fn verify_proof(serialized_proof: &SerializableProof) -> Result<(), ProofError> {
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        
+        // Deserialize the proof
+        let proof = crate::core::proof::deserialize_proof(serialized_proof)?;
+        
+        // Verify the proof
+        verify_proof(&circuit_data, &proof)
+    }
 }
 
 #[cfg(test)]
@@ -244,14 +441,10 @@ mod tests {
     
     #[test]
     fn test_transfer() {
-        // Create a simplified version of the circuit for testing
-        // This test only verifies that the circuit can be created without errors
+        // This test verifies that we can create and build the circuit
         let circuit_data = TransferCircuit::create_circuit();
         
-        // Skip proof generation and verification for now
-        // In a real test, we would set up proper witnesses and verify the proof
-        
-        // Just check that the circuit was created successfully
-        assert!(circuit_data.common.degree_bits() > 0);
+        // Just verify that the circuit was created successfully
+        assert!(circuit_data.common.gates.len() > 0, "Circuit should have gates");
     }
 }

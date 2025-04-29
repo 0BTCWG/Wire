@@ -8,7 +8,10 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2_field::types::Field;
+use plonky2::iop::target::Target;
 use wire_lib::core::UTXO;
+use wire_lib::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
+use wire_lib::core::proof::SerializableProof;
 use wire_lib::circuits::{
     WrappedAssetMintCircuit, 
     WrappedAssetBurnCircuit, 
@@ -89,87 +92,228 @@ fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str) -> Res
             info!("Building WrappedAssetMint circuit...");
             
             // Extract parameters from input JSON
-            let _recipient_pk_hash = extract_hex_array(&input_json, "recipientPkHash")?;
+            let recipient_pk_hash = extract_hex_array(&input_json, "recipientPkHash")?;
             let amount = extract_u64(&input_json, "amount")?;
-            let _salt = extract_hex_array(&input_json, "salt")?;
-            let _custodian_pk_x = extract_field_element(&input_json, "custodianPkX")?;
-            let _custodian_pk_y = extract_field_element(&input_json, "custodianPkY")?;
-            let _sig_r_x = extract_field_element(&input_json, "sigRX")?;
-            let _sig_r_y = extract_field_element(&input_json, "sigRY")?;
-            let _sig_s = extract_field_element(&input_json, "sigS")?;
+            let deposit_nonce = extract_u64(&input_json, "depositNonce")?;
+            let custodian_pk_x = extract_u64(&input_json, "custodianPkX")?;
+            let custodian_pk_y = extract_u64(&input_json, "custodianPkY")?;
+            let signature_r_x = extract_u64(&input_json, "signatureRX")?;
+            let signature_r_y = extract_u64(&input_json, "signatureRY")?;
+            let signature_s = extract_u64(&input_json, "signatureS")?;
             
-            // Create the circuit
-            info!("Creating WrappedAssetMintCircuit...");
-            let _circuit_data = WrappedAssetMintCircuit::create_circuit();
+            // Generate a real proof
+            info!("Generating proof for WrappedAssetMint circuit...");
+            let serialized_proof = WrappedAssetMintCircuit::generate_proof(
+                &recipient_pk_hash,
+                amount,
+                deposit_nonce,
+                custodian_pk_x,
+                custodian_pk_y,
+                signature_r_x,
+                signature_r_y,
+                signature_s,
+            ).map_err(|e| format!("Failed to generate proof: {}", e))?;
             
-            // For now, we'll create a simplified proof structure
-            // In a real implementation, we would use the circuit to generate a real proof
-            let public_inputs = vec![amount as u64];
-            
+            // Return the proof
             serde_json::json!({
                 "success": true,
                 "circuitType": "WrappedAssetMint",
-                "publicInputs": public_inputs,
-                "proof": {
-                    "commitments": [format!("0x{}", hex::encode(&[1u8; 32]))],
-                    "evaluations": [format!("0x{}", hex::encode(&[2u8; 32]))],
-                    "openings": [format!("0x{}", hex::encode(&[3u8; 32]))]
-                }
+                "publicInputs": serialized_proof.public_inputs,
+                "proof": serialized_proof.proof_bytes,
             })
         },
         "wrapped_asset_burn" => {
             info!("Building WrappedAssetBurn circuit...");
             
             // Extract parameters from input JSON
-            let _input_utxo_owner = extract_hex_array(&input_json, "inputUtxoOwner")?;
-            let _input_utxo_asset_id = extract_hex_array(&input_json, "inputUtxoAssetId")?;
+            let input_utxo_owner_pubkey_hash = extract_hex_array(&input_json, "inputUtxoOwnerPubkeyHash")?;
+            let input_utxo_asset_id = extract_hex_array(&input_json, "inputUtxoAssetId")?;
             let input_utxo_amount = extract_u64(&input_json, "inputUtxoAmount")?;
-            let _input_utxo_salt = extract_hex_array(&input_json, "inputUtxoSalt")?;
-            let _owner_sk = extract_field_element(&input_json, "ownerSk")?;
-            let _btc_address = extract_string(&input_json, "btcAddress")?;
+            let input_utxo_salt = extract_hex_array(&input_json, "inputUtxoSalt")?;
+            let sender_sk = extract_u64(&input_json, "senderSk")?;
+            let sender_pk_x = extract_u64(&input_json, "senderPkX")?;
+            let sender_pk_y = extract_u64(&input_json, "senderPkY")?;
+            let signature_r_x = extract_u64(&input_json, "signatureRX")?;
+            let signature_r_y = extract_u64(&input_json, "signatureRY")?;
+            let signature_s = extract_u64(&input_json, "signatureS")?;
+            let destination_btc_address = extract_hex_array(&input_json, "destinationBtcAddress")?;
             
-            // Create the circuit
-            info!("Creating WrappedAssetBurnCircuit...");
-            let _circuit_data = WrappedAssetBurnCircuit::create_circuit();
+            // Optional fee parameters
+            let fee_btc = input_json.get("feeBtc").and_then(|v| v.as_u64());
+            let fee_expiry = input_json.get("feeExpiry").and_then(|v| v.as_u64());
+            let fee_signature_r_x = input_json.get("feeSignatureRX").and_then(|v| v.as_u64());
+            let fee_signature_r_y = input_json.get("feeSignatureRY").and_then(|v| v.as_u64());
+            let fee_signature_s = input_json.get("feeSignatureS").and_then(|v| v.as_u64());
+            let custodian_pk_x = input_json.get("custodianPkX").and_then(|v| v.as_u64());
+            let custodian_pk_y = input_json.get("custodianPkY").and_then(|v| v.as_u64());
             
-            // For now, we'll create a simplified proof structure
-            let public_inputs = vec![input_utxo_amount as u64];
+            // Create a circuit instance
+            let circuit = WrappedAssetBurnCircuit {
+                input_utxo: UTXOTarget {
+                    owner_pubkey_hash_target: vec![],
+                    asset_id_target: vec![],
+                    amount_target: Target::default(),
+                    salt_target: vec![],
+                },
+                sender_pk: PublicKeyTarget {
+                    point: PointTarget {
+                        x: Target::default(),
+                        y: Target::default(),
+                    },
+                },
+                sender_sig: SignatureTarget {
+                    r_point: PointTarget {
+                        x: Target::default(),
+                        y: Target::default(),
+                    },
+                    s_scalar: Target::default(),
+                },
+                destination_btc_address: vec![],
+                fee_quote: None,
+                custodian_pk: None,
+            };
             
+            // Generate a real proof
+            info!("Generating proof for WrappedAssetBurn circuit...");
+            let serialized_proof = circuit.generate_proof(
+                &input_utxo_owner_pubkey_hash,
+                &input_utxo_asset_id,
+                input_utxo_amount,
+                &input_utxo_salt,
+                sender_sk,
+                sender_pk_x,
+                sender_pk_y,
+                signature_r_x,
+                signature_r_y,
+                signature_s,
+                &destination_btc_address,
+                fee_btc,
+                fee_expiry,
+                fee_signature_r_x,
+                fee_signature_r_y,
+                fee_signature_s,
+                custodian_pk_x,
+                custodian_pk_y,
+            ).map_err(|e| format!("Failed to generate proof: {}", e))?;
+            
+            // Return the proof
             serde_json::json!({
                 "success": true,
                 "circuitType": "WrappedAssetBurn",
-                "publicInputs": public_inputs,
-                "proof": {
-                    "commitments": [format!("0x{}", hex::encode(&[1u8; 32]))],
-                    "evaluations": [format!("0x{}", hex::encode(&[2u8; 32]))],
-                    "openings": [format!("0x{}", hex::encode(&[3u8; 32]))]
-                }
+                "publicInputs": serialized_proof.public_inputs,
+                "proof": serialized_proof.proof_bytes,
             })
         },
         "transfer" => {
             info!("Building Transfer circuit...");
             
             // Extract parameters from input JSON
-            let input_utxos = extract_utxos(&input_json, "inputUtxos")?;
-            let output_utxos = extract_utxos(&input_json, "outputUtxos")?;
-            let _owner_sks = extract_field_elements(&input_json, "ownerSks")?;
+            let input_utxos_json = input_json["inputUtxos"].as_array()
+                .ok_or_else(|| "Missing or invalid inputUtxos array".to_string())?;
             
-            // Create the circuit
-            info!("Creating TransferCircuit...");
-            let _circuit_data = TransferCircuit::create_circuit();
+            let mut input_utxos_data = Vec::new();
+            for utxo_json in input_utxos_json {
+                let owner_pubkey_hash = extract_hex_array(utxo_json, "ownerPubkeyHash")?;
+                let asset_id = extract_hex_array(utxo_json, "assetId")?;
+                let amount = extract_u64(utxo_json, "amount")?;
+                let salt = extract_hex_array(utxo_json, "salt")?;
+                
+                input_utxos_data.push((owner_pubkey_hash, asset_id, amount, salt));
+            }
             
-            // For now, we'll create a simplified proof structure
-            let public_inputs = vec![input_utxos.len() as u64, output_utxos.len() as u64];
+            let recipient_pk_hashes_json = input_json["recipientPkHashes"].as_array()
+                .ok_or_else(|| "Missing or invalid recipientPkHashes array".to_string())?;
             
+            let mut recipient_pk_hashes = Vec::new();
+            for pk_hash_json in recipient_pk_hashes_json {
+                let pk_hash = hex::decode(pk_hash_json.as_str()
+                    .ok_or_else(|| "Invalid recipient public key hash".to_string())?
+                    .trim_start_matches("0x"))
+                    .map_err(|e| format!("Failed to decode recipient public key hash: {}", e))?;
+                
+                recipient_pk_hashes.push(pk_hash);
+            }
+            
+            let output_amounts_json = input_json["outputAmounts"].as_array()
+                .ok_or_else(|| "Missing or invalid outputAmounts array".to_string())?;
+            
+            let mut output_amounts = Vec::new();
+            for amount_json in output_amounts_json {
+                let amount = amount_json.as_u64()
+                    .ok_or_else(|| "Invalid output amount".to_string())?;
+                
+                output_amounts.push(amount);
+            }
+            
+            let sender_sk = extract_u64(&input_json, "senderSk")?;
+            let sender_pk_x = extract_u64(&input_json, "senderPkX")?;
+            let sender_pk_y = extract_u64(&input_json, "senderPkY")?;
+            let signature_r_x = extract_u64(&input_json, "signatureRX")?;
+            let signature_r_y = extract_u64(&input_json, "signatureRY")?;
+            let signature_s = extract_u64(&input_json, "signatureS")?;
+            
+            let fee_input_utxo_json = &input_json["feeInputUtxo"];
+            let fee_owner_pubkey_hash = extract_hex_array(fee_input_utxo_json, "ownerPubkeyHash")?;
+            let fee_asset_id = extract_hex_array(fee_input_utxo_json, "assetId")?;
+            let fee_amount_value = extract_u64(fee_input_utxo_json, "amount")?;
+            let fee_salt = extract_hex_array(fee_input_utxo_json, "salt")?;
+            
+            let fee_input_utxo_data = (fee_owner_pubkey_hash, fee_asset_id, fee_amount_value, fee_salt);
+            
+            let fee_amount = extract_u64(&input_json, "feeAmount")?;
+            let fee_reservoir_address_hash = extract_hex_array(&input_json, "feeReservoirAddressHash")?;
+            let nonce = extract_u64(&input_json, "nonce")?;
+            
+            // Generate a real proof
+            info!("Generating proof for Transfer circuit...");
+            let circuit = TransferCircuit {
+                input_utxos: vec![],
+                recipient_pk_hashes: vec![],
+                output_amounts: vec![],
+                sender_pk: PublicKeyTarget {
+                    point: PointTarget {
+                        x: Target::default(),
+                        y: Target::default(),
+                    },
+                },
+                sender_sig: SignatureTarget {
+                    r_point: PointTarget {
+                        x: Target::default(),
+                        y: Target::default(),
+                    },
+                    s_scalar: Target::default(),
+                },
+                fee_input_utxo: UTXOTarget {
+                    owner_pubkey_hash_target: vec![],
+                    asset_id_target: vec![],
+                    amount_target: Target::default(),
+                    salt_target: vec![],
+                },
+                fee_amount: Target::default(),
+                fee_reservoir_address_hash: vec![],
+            };
+            let serialized_proof = circuit.generate_proof(
+                input_utxos_data,
+                recipient_pk_hashes,
+                output_amounts,
+                sender_sk,
+                sender_pk_x,
+                sender_pk_y,
+                signature_r_x,
+                signature_r_y,
+                signature_s,
+                fee_input_utxo_data,
+                fee_amount,
+                fee_reservoir_address_hash,
+                nonce,
+            ).map_err(|e| format!("Failed to generate proof: {}", e))?;
+            
+            // Return the proof
             serde_json::json!({
                 "success": true,
                 "circuitType": "Transfer",
-                "publicInputs": public_inputs,
-                "proof": {
-                    "commitments": [format!("0x{}", hex::encode(&[1u8; 32]))],
-                    "evaluations": [format!("0x{}", hex::encode(&[2u8; 32]))],
-                    "openings": [format!("0x{}", hex::encode(&[3u8; 32]))]
-                }
+                "publicInputs": serialized_proof.public_inputs,
+                "proof": serialized_proof.proof_bytes,
             })
         },
         "native_asset_create" => {
@@ -273,96 +417,88 @@ fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str) -> Res
 }
 
 /// Verify a proof
-fn verify_proof(circuit_type: &str, proof_path: &str) -> Result<(), String> {
-    info!("Verifying proof for circuit: {}", circuit_type);
+pub fn verify_proof(circuit_type: &str, proof_path: &str) -> Result<(), String> {
+    info!("Verifying proof for circuit type: {}", circuit_type);
     
-    // Read the proof file
-    let proof_data = fs::read_to_string(proof_path)
+    // Read the proof from the file
+    let proof_json = fs::read_to_string(proof_path)
         .map_err(|e| format!("Failed to read proof file: {}", e))?;
     
-    // Parse the proof data
-    let proof_json: serde_json::Value = serde_json::from_str(&proof_data)
+    // Parse the proof JSON
+    let proof_value: serde_json::Value = serde_json::from_str(&proof_json)
         .map_err(|e| format!("Failed to parse proof JSON: {}", e))?;
     
-    // Extract the public inputs and proof data
-    let _public_inputs = proof_json.get("publicInputs")
-        .ok_or_else(|| "Missing publicInputs in proof file".to_string())?
-        .as_array()
-        .ok_or_else(|| "publicInputs is not an array".to_string())?;
+    // Verify the proof structure
+    verify_proof_structure(&proof_value)?;
     
-    let proof_obj = proof_json.get("proof")
-        .ok_or_else(|| "Missing proof object in proof file".to_string())?;
+    // Extract the circuit type
+    let circuit_type_from_proof = proof_value["circuitType"].as_str()
+        .ok_or_else(|| "Proof does not contain a circuit type".to_string())?;
+    
+    // Ensure the circuit type matches
+    if circuit_type != circuit_type_from_proof {
+        return Err(format!("Circuit type mismatch: expected {}, got {}", circuit_type, circuit_type_from_proof));
+    }
+    
+    // Extract the public inputs and proof
+    let public_inputs = proof_value["publicInputs"].as_array()
+        .ok_or_else(|| "Proof does not contain public inputs".to_string())?;
+    
+    let public_inputs_vec: Vec<String> = public_inputs.iter()
+        .map(|v| v.as_str().unwrap_or("").to_string())
+        .collect();
+    
+    let proof_bytes = proof_value["proof"].as_str()
+        .ok_or_else(|| "Proof does not contain proof bytes".to_string())?
+        .to_string();
+    
+    // Create a serializable proof
+    let serializable_proof = SerializableProof {
+        public_inputs: public_inputs_vec,
+        proof_bytes,
+    };
     
     // Verify the proof based on the circuit type
-    let is_valid = match circuit_type {
+    match circuit_type {
         "wrapped_asset_mint" => {
             info!("Verifying WrappedAssetMint proof...");
-            
-            // Create the circuit
-            let _circuit_data = WrappedAssetMintCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            WrappedAssetMintCircuit::verify_proof(&serializable_proof)
+                .map_err(|e| format!("Failed to verify proof: {}", e))?;
+            info!("WrappedAssetMint proof verified successfully!");
         },
         "wrapped_asset_burn" => {
             info!("Verifying WrappedAssetBurn proof...");
-            
-            // Create the circuit
-            let _circuit_data = WrappedAssetBurnCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            WrappedAssetBurnCircuit::verify_proof(&serializable_proof)
+                .map_err(|e| format!("Failed to verify proof: {}", e))?;
+            info!("WrappedAssetBurn proof verified successfully!");
         },
         "transfer" => {
             info!("Verifying Transfer proof...");
-            
-            // Create the circuit
-            let _circuit_data = TransferCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            TransferCircuit::verify_proof(&serializable_proof)
+                .map_err(|e| format!("Failed to verify proof: {}", e))?;
+            info!("Transfer proof verified successfully!");
         },
         "native_asset_create" => {
             info!("Verifying NativeAssetCreate proof...");
-            
-            // Create the circuit
-            let _circuit_data = NativeAssetCreateCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            // TODO: Implement real proof verification for NativeAssetCreate
+            info!("NativeAssetCreate proof verification not yet implemented with real ZK proofs");
         },
         "native_asset_mint" => {
             info!("Verifying NativeAssetMint proof...");
-            
-            // Create the circuit
-            let _circuit_data = NativeAssetMintCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            // TODO: Implement real proof verification for NativeAssetMint
+            info!("NativeAssetMint proof verification not yet implemented with real ZK proofs");
         },
         "native_asset_burn" => {
             info!("Verifying NativeAssetBurn proof...");
-            
-            // Create the circuit
-            let _circuit_data = NativeAssetBurnCircuit::create_circuit();
-            
-            // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(proof_obj)?
+            // TODO: Implement real proof verification for NativeAssetBurn
+            info!("NativeAssetBurn proof verification not yet implemented with real ZK proofs");
         },
         _ => {
-            return Err(format!("Unknown circuit type: {}", circuit_type));
+            return Err(format!("Unsupported circuit type: {}", circuit_type));
         }
-    };
-    
-    if is_valid {
-        info!("Proof verified successfully!");
-        println!("✅ Proof is valid");
-        Ok(())
-    } else {
-        error!("Proof verification failed!");
-        println!("❌ Proof is invalid");
-        Err("Proof verification failed".to_string())
     }
+    
+    Ok(())
 }
 
 // Helper function to verify the structure of a proof

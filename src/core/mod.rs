@@ -1,7 +1,9 @@
-// Core types and structures for the 0BTC Wire system
+// Core module for the 0BTC Wire system
 
-mod types;
 mod constants;
+mod types;
+pub mod proof;
 
-pub use types::*;
 pub use constants::*;
+pub use types::*;
+pub use proof::*;
