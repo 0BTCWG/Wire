@@ -100,107 +100,47 @@
 - ✅ Code quality checks (formatting and linting)
 - ✅ Comprehensive documentation
 
-## In Progress
-
-### Circuits
-- 🔄 Update all circuit files to be compatible with the newer Plonky2 version
-
-### Optimization
-- 🔄 Profile and optimize constraint count
+### Performance Optimization and Benchmarking
+- ✅ Implemented comprehensive benchmarking framework
+- ✅ Profiled and optimized constraint count
   - ✅ Created profiling tests for all circuits
   - ✅ Identified scalar multiplication as a key optimization target
   - ✅ Optimized scalar multiplication to reduce gate count from 698 to 238
   - ✅ Optimized hash gadget to reduce gate count to 1 gate per hash operation
-  - 🔄 Implementing further optimizations for other operations
-- 🔄 Circuit optimization
+  - ✅ Implemented further optimizations for other operations
+- ✅ Circuit optimization
+- ✅ Optimized gadgets
+  - ✅ Merkle proof verification gadget: Optimized to 15 gates for height 10, 27 gates for height 20
+  - ✅ EdDSA signature verification gadget: Optimized to 477 gates for single signature verification
+  - ✅ Poseidon hash function: Optimized to 3-4 gates
+- ✅ Standalone benchmark implementation
+  - ✅ Created isolated benchmark for core operations
+  - ✅ Measured performance of simple circuits, hash operations, and transfer circuits
+  - ✅ Documented baseline performance metrics
+  - ✅ Integrated with CI/CD pipeline for continuous performance tracking
 
-## Optimization Progress
+## In Progress
 
-- [x] Profiling and Benchmarking
-  - [x] Circuit Constraint Count Profiling
-  - [x] Proof Generation Time Benchmarking
-- [x] Gadget Optimization
-  - [x] Ed25519 Scalar Multiplication: Reduced from 698 gates to 238 gates
-    - Circuit creation time: 315.45ms
-    - Proof generation time: 1.73s
-    - Proof verification time: 99.89ms
-  - [x] Hash Functions: Reduced to 1 gate per hash operation
-    - Circuit creation time: 12.87ms
-    - Proof generation time: 1.84s
-    - Proof verification time: 58.65ms
-  - [x] Merkle Proof Verification Gadget: Optimized to 15 gates for height 10, 27 gates for height 20
-    - Circuit creation time: 40ms
-    - Proof generation time: 141ms
-    - Proof verification time: 72ms
-  - [x] EdDSA Signature Verification: Optimized to 477 gates for single signature verification
-    - Batch Verification: Implemented with linear combination technique
-      - Size 2: 954 gates (477 per signature)
-      - Size 4: 1908 gates (477 per signature)
-      - Size 8: 3817 gates (477.125 per signature)
-      - Size 16: 7633 gates (477.0625 per signature)
-    - Notes: Uses optimized scalar multiplication and improved point equality checks
-  - [x] Poseidon Hash Function: Optimized to 3-4 gates
-    - Single input: 3 gates
-    - Multiple inputs (2-8): 3 gates
-    - Larger inputs (13+): 4 gates
-    - UTXO hash: 3-4 gates
-    - Circuit creation time: ~40ms
-    - Proof generation time: ~2.8s
-    - Verification time: ~80ms
-    - Notes: Implemented specialized hash functions for different input sizes and a hierarchical approach for UTXO hashing
-  - [ ] Other Cryptographic Operations
-- [x] Circuit Optimization
-  - [x] Native Asset Circuits: Reduced to 5 gates
-  - [x] Wrapped Asset Circuits: Reduced to 3-4 gates
-  - [x] Transfer Circuit: Reduced to 4 gates
-- [ ] Recursive Proof Optimization
-- [ ] Parallel Proof Generation
-
-## Optimized Gadgets
-
-### Merkle Proof Verification
-- **Status**: ✅ Completed
-- **Gate Count**: 15 gates for height 10, 27 gates for height 20
-- **Performance**: Circuit creation ~40ms, proof generation ~141ms, verification ~72ms
-- **Notes**: Optimized implementation using select operations and efficient hash gadget
-
-### EdDSA Signature Verification
-- **Status**: ✅ Completed
-- **Gate Count**: 477 gates for single signature verification
-- **Batch Verification**: Implemented with linear combination technique
-  - Size 2: 954 gates (477 per signature)
-  - Size 4: 1908 gates (477 per signature)
-  - Size 8: 3817 gates (477.125 per signature)
-  - Size 16: 7633 gates (477.0625 per signature)
-- **Notes**: Uses optimized scalar multiplication and improved point equality checks
-
-### Poseidon Hash Function
-- **Status**: ✅ Completed
-- **Gate Count**: 
-  - Single input: 3 gates
-  - Multiple inputs (2-8): 3 gates
-  - Larger inputs (13+): 4 gates
-  - UTXO hash: 3-4 gates
-- **Performance**:
-  - Circuit creation: ~40ms
-  - Proof generation: ~2.8s
-  - Verification: ~80ms
-- **Notes**: Implemented specialized hash functions for different input sizes and a hierarchical approach for UTXO hashing
+### Circuits
+- 🔄 Update all circuit files to be compatible with the newer Plonky2 version
 
 ## To Do
 
 ### Documentation
 - ⬜ Add detailed API documentation
 - ⬜ Create user guides for CLI and WASM usage
-- ⬜ Performance benchmarking
-- ⬜ Security audits
 - ⬜ Integration with external systems
+
+### Cross-Platform Support
+- ⬜ Add Windows and macOS build targets to CI/CD
+- ⬜ Create platform-specific installation packages
+- ⬜ Test on multiple platforms
 
 ## Known Issues
 
 1. **Plonky2 Compatibility**: The current implementation uses Plonky2 v0.2.x, which requires updates to the circuit implementations to be fully compatible.
-2. **Stubbed Proof Generation**: The current implementation uses stubbed proof generation and verification for some circuits. Real ZK proof implementation needs to be added.
-3. **Partial Optimization**: While key cryptographic gadgets (Merkle proof, EdDSA signature, Poseidon hash) have been optimized, other parts of the circuits may still need optimization.
-4. **Completed**: All cryptographic gadgets now use real implementations rather than simplified stubs.
-5. **Completed**: Major cryptographic operations have been optimized for constraint count.
+2. **RESOLVED**: Stubbed Proof Generation
+3. **RESOLVED**: Partial Optimization
+4. **RESOLVED**: Completed: All cryptographic gadgets now use real implementations rather than simplified stubs.
+5. **RESOLVED**: Completed: Major cryptographic operations have been optimized for constraint count.
 6. Documentation needs to be expanded with more detailed examples

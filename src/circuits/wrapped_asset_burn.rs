@@ -387,16 +387,14 @@ impl WrappedAssetBurnCircuit {
         )
     }
     
-    /// Verify a proof for the circuit
-    pub fn verify_proof(serialized_proof: &SerializableProof) -> Result<(), ProofError> {
-        // Create the circuit
+    /// Verify a proof for this circuit
+    pub fn verify_proof(serializable_proof: &SerializableProof) -> Result<(), String> {
         let circuit_data = Self::create_circuit();
+        let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
+            .map_err(|e| format!("Failed to deserialize proof: {}", e))?;
         
-        // Deserialize the proof
-        let proof = crate::core::proof::deserialize_proof(serialized_proof)?;
-        
-        // Verify the proof
-        verify_proof(&circuit_data, &proof)
+        circuit_data.verify(proof.clone())
+            .map_err(|e| format!("Failed to verify proof: {}", e))
     }
 }
 

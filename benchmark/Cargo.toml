@@ -1,0 +1,11 @@
+[package]
+name = "wire_benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+plonky2 = "0.2.1"
+plonky2_field = "0.2.0"
+plonky2_util = "0.2.0"
+rand = "0.8.5"
+chrono = "0.4.31"

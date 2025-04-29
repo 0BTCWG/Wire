@@ -1,16 +1,39 @@
 // WebAssembly bindings for the 0BTC Wire system
+#[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "wasm")]
 use js_sys::{Array, Object, Uint8Array};
+#[cfg(feature = "wasm")]
 use web_sys::console;
 use serde::{Serialize, Deserialize};
+#[cfg(feature = "wasm")]
+use serde_wasm_bindgen;
 use serde_json::json;
 use log::{info, error};
 use rand::{rngs::OsRng, RngCore};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer};
-use serde_wasm_bindgen;
 use plonky2::iop::target::Target;
-use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::plonk::circuit_data::CircuitData;
+use plonky2::plonk::proof::ProofWithPublicInputs;
+#[cfg(feature = "wasm")]
+use std::convert::TryFrom;
+
+// Import utility functions
+use crate::utils::{
+    parallel_prover::{
+        generate_proofs_in_parallel,
+        generate_proofs_for_circuit,
+        verify_proofs_in_parallel,
+        ParallelProverOptions,
+    },
+    recursive_prover::{
+        aggregate_proofs as recursive_aggregate_proofs,
+        verify_aggregated_proof as recursive_verify_aggregated_proof,
+        RecursiveProverOptions,
+    },
+};
 
 use crate::circuits::wrapped_asset_mint::WrappedAssetMintCircuit;
 use crate::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
@@ -22,13 +45,9 @@ use crate::core::proof::SerializableProof;
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
 use crate::circuits::wrapped_asset_mint::SignedAttestationTarget;
 use crate::circuits::wrapped_asset_burn::SignedQuoteTarget;
-use crate::utils::{
-    aggregate_proofs,
-    verify_aggregated_proof,
-    RecursiveProverOptions,
-};
 
 // Initialize the WASM module
+#[cfg(feature = "wasm")]
 #[wasm_bindgen(start)]
 pub fn start() -> Result<(), JsValue> {
     // Initialize the console error panic hook for better error messages
@@ -41,6 +60,7 @@ pub fn start() -> Result<(), JsValue> {
 }
 
 // Generate a new Ed25519 keypair
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn generate_keypair() -> Result<JsValue, JsValue> {
     let mut csprng = OsRng{};
@@ -63,6 +83,7 @@ pub fn generate_keypair() -> Result<JsValue, JsValue> {
 }
 
 // Sign a message with an Ed25519 private key
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn sign_message(secret_key_hex: &str, message_hex: &str) -> Result<JsValue, JsValue> {
     // Remove 0x prefix if present
@@ -101,6 +122,7 @@ pub fn sign_message(secret_key_hex: &str, message_hex: &str) -> Result<JsValue, 
 }
 
 // Generate a proof for minting wrapped assets
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_wrapped_asset_mint(params: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Generating proof for wrapped asset mint..."));
@@ -170,6 +192,7 @@ pub fn prove_wrapped_asset_mint(params: &JsValue) -> Result<JsValue, JsValue> {
 }
 
 // Verify a proof for minting wrapped assets
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn verify_wrapped_asset_mint(proof_json: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Verifying proof for wrapped asset mint..."));
@@ -220,6 +243,7 @@ pub fn verify_wrapped_asset_mint(proof_json: &JsValue) -> Result<JsValue, JsValu
 }
 
 /// Create a proof for transferring assets
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_transfer(params: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Generating proof for transfer..."));
@@ -383,6 +407,7 @@ pub fn prove_transfer(params: &JsValue) -> Result<JsValue, JsValue> {
 }
 
 // Verify a proof for transferring assets
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn verify_transfer(proof_json: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Verifying proof for transfer..."));
@@ -433,6 +458,7 @@ pub fn verify_transfer(proof_json: &JsValue) -> Result<JsValue, JsValue> {
 }
 
 /// Create a proof for burning wrapped Bitcoin
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_wrapped_asset_burn(params: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Generating proof for wrapped asset burn..."));
@@ -535,6 +561,7 @@ pub fn prove_wrapped_asset_burn(params: &JsValue) -> Result<JsValue, JsValue> {
 }
 
 // Verify a proof for burning wrapped assets
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn verify_wrapped_asset_burn(proof_json: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Verifying proof for wrapped asset burn..."));
@@ -585,6 +612,7 @@ pub fn verify_wrapped_asset_burn(proof_json: &JsValue) -> Result<JsValue, JsValu
 }
 
 /// Create a proof for creating a new native asset
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_native_asset_create(
     _creator_pk: JsValue,
@@ -612,6 +640,7 @@ pub fn prove_native_asset_create(
 }
 
 /// Create a proof for minting a native asset
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_native_asset_mint(
     _asset_id: JsValue,
@@ -638,6 +667,7 @@ pub fn prove_native_asset_mint(
 }
 
 /// Create a proof for burning a native asset
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn prove_native_asset_burn(
     _input_utxos: JsValue,
@@ -662,6 +692,7 @@ pub fn prove_native_asset_burn(
 }
 
 /// Verify a proof
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn verify_proof(
     proof: JsValue,
@@ -751,6 +782,7 @@ pub fn verify_proof(
 }
 
 // Helper function to verify the structure of a proof
+#[cfg(feature = "wasm")]
 fn verify_proof_structure(proof: &js_sys::Object) -> Result<bool, JsValue> {
     // Check that the proof has the expected structure
     let commitments_js = js_sys::Reflect::get(proof, &JsValue::from_str("commitments"))?;
@@ -809,6 +841,7 @@ fn verify_proof_structure(proof: &js_sys::Object) -> Result<bool, JsValue> {
 }
 
 // Aggregate multiple proofs into a single proof
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn aggregate_proofs(
     proofs_array: JsValue,
@@ -884,7 +917,7 @@ pub fn aggregate_proofs(
     };
     
     console::log_1(&JsValue::from_str(&format!("Aggregating proofs with batch size: {}", batch_size)));
-    let result = aggregate_proofs(proofs, options)
+    let result = recursive_aggregate_proofs(proofs, options)
         .map_err(|e| JsValue::from_str(&format!("Failed to aggregate proofs: {}", e)))?;
     
     console::log_1(&JsValue::from_str(&format!("Successfully aggregated {} proofs", result.num_proofs)));
@@ -917,6 +950,7 @@ pub fn aggregate_proofs(
 }
 
 // Verify an aggregated proof
+#[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn verify_aggregated_proof(
     proof_js: JsValue,
@@ -943,7 +977,7 @@ pub fn verify_aggregated_proof(
     
     // Verify the aggregated proof
     let start = js_sys::Date::now();
-    let verified_count = verify_aggregated_proof(&proof, &circuit)
+    let verified_count = recursive_verify_aggregated_proof(&proof, &circuit)
         .map_err(|e| JsValue::from_str(&format!("Failed to verify aggregated proof: {}", e)))?;
     let verification_time = (js_sys::Date::now() - start) / 1000.0;
     
@@ -968,6 +1002,7 @@ pub fn verify_aggregated_proof(
 }
 
 // Create a dummy circuit for proof conversion and verification
+#[cfg(feature = "wasm")]
 fn create_dummy_circuit(circuit_type: &str) -> Result<plonky2::plonk::circuit_data::CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2>, JsValue> {
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;

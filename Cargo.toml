@@ -51,12 +51,28 @@ name = "wire_lib"
 path = "src/lib.rs"
 crate-type = ["cdylib", "rlib"]
 
+[[test]]
+name = "integration_benchmarks"
+path = "tests/integration/benchmarks.rs"
+
 [[bin]]
 name = "wire"
 path = "src/main.rs"
 
+[[bin]]
+name = "simple_benchmark"
+path = "scripts/simple_benchmark.rs"
+
+[[bin]]
+name = "benchmark_standalone"
+path = "benchmark_standalone.rs"
+
+[[bin]]
+name = "wire_benchmark"
+path = "benchmark/src/main.rs"
+
 [features]
-default = ["wasm"]
+default = []
 wasm = ["wasm-bindgen", "js-sys", "web-sys", "console_error_panic_hook", "serde-wasm-bindgen"]
 
 [profile.release]

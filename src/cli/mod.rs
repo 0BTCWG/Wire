@@ -10,10 +10,11 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2_field::types::Field;
 use plonky2::iop::target::Target;
 use plonky2::plonk::proof::ProofWithPublicInputs;
-use wire_lib::core::UTXO;
-use wire_lib::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
-use wire_lib::core::proof::SerializableProof;
-use wire_lib::utils::{
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use crate::core::UTXO;
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
+use crate::core::proof::SerializableProof;
+use crate::utils::{
     aggregate_proofs,
     verify_aggregated_proof,
     RecursiveProverOptions,
@@ -21,7 +22,7 @@ use wire_lib::utils::{
     verify_proofs_in_parallel,
     ParallelProverOptions,
 };
-use wire_lib::circuits::{
+use crate::circuits::{
     WrappedAssetMintCircuit, 
     WrappedAssetBurnCircuit, 
     TransferCircuit,
