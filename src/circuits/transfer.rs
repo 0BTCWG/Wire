@@ -422,6 +422,68 @@ impl TransferCircuit {
         serialize_proof(&proof)
     }
     
+    /// Generate a proof for the transfer circuit (static method)
+    pub fn generate_proof_static(
+        input_utxos_data: Vec<(Vec<u8>, Vec<u8>, u64, Vec<u8>)>, // (owner_pubkey_hash, asset_id, amount, salt)
+        recipient_pk_hashes: Vec<Vec<u8>>,
+        output_amounts: Vec<u64>,
+        sender_sk: u64,
+        sender_pk_x: u64,
+        sender_pk_y: u64,
+        signature_r_x: u64,
+        signature_r_y: u64,
+        signature_s: u64,
+        fee_input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
+        fee_amount: u64,
+        fee_reservoir_address_hash: Vec<u8>,
+        nonce: u64,
+    ) -> Result<SerializableProof, ProofError> {
+        // Create a dummy circuit instance
+        let circuit = Self {
+            input_utxos: vec![],
+            recipient_pk_hashes: vec![],
+            output_amounts: vec![],
+            sender_pk: PublicKeyTarget {
+                point: PointTarget {
+                    x: Target::default(),
+                    y: Target::default(),
+                },
+            },
+            sender_sig: SignatureTarget {
+                r_point: PointTarget {
+                    x: Target::default(),
+                    y: Target::default(),
+                },
+                s_scalar: Target::default(),
+            },
+            fee_input_utxo: UTXOTarget {
+                owner_pubkey_hash_target: vec![],
+                asset_id_target: vec![],
+                amount_target: Target::default(),
+                salt_target: vec![],
+            },
+            fee_amount: Target::default(),
+            fee_reservoir_address_hash: vec![],
+        };
+        
+        // Call the instance method
+        circuit.generate_proof(
+            input_utxos_data,
+            recipient_pk_hashes,
+            output_amounts,
+            sender_sk,
+            sender_pk_x,
+            sender_pk_y,
+            signature_r_x,
+            signature_r_y,
+            signature_s,
+            fee_input_utxo_data,
+            fee_amount,
+            fee_reservoir_address_hash,
+            nonce,
+        )
+    }
+    
     /// Verify a proof for the circuit
     pub fn verify_proof(serialized_proof: &SerializableProof) -> Result<(), ProofError> {
         // Create the circuit

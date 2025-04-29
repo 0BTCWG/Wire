@@ -175,7 +175,7 @@ fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str) -> Res
             
             // Generate a real proof
             info!("Generating proof for WrappedAssetBurn circuit...");
-            let serialized_proof = circuit.generate_proof(
+            let serialized_proof = WrappedAssetBurnCircuit::generate_proof_static(
                 &input_utxo_owner_pubkey_hash,
                 &input_utxo_asset_id,
                 input_utxo_amount,
@@ -266,33 +266,7 @@ fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str) -> Res
             
             // Generate a real proof
             info!("Generating proof for Transfer circuit...");
-            let circuit = TransferCircuit {
-                input_utxos: vec![],
-                recipient_pk_hashes: vec![],
-                output_amounts: vec![],
-                sender_pk: PublicKeyTarget {
-                    point: PointTarget {
-                        x: Target::default(),
-                        y: Target::default(),
-                    },
-                },
-                sender_sig: SignatureTarget {
-                    r_point: PointTarget {
-                        x: Target::default(),
-                        y: Target::default(),
-                    },
-                    s_scalar: Target::default(),
-                },
-                fee_input_utxo: UTXOTarget {
-                    owner_pubkey_hash_target: vec![],
-                    asset_id_target: vec![],
-                    amount_target: Target::default(),
-                    salt_target: vec![],
-                },
-                fee_amount: Target::default(),
-                fee_reservoir_address_hash: vec![],
-            };
-            let serialized_proof = circuit.generate_proof(
+            let serialized_proof = TransferCircuit::generate_proof_static(
                 input_utxos_data,
                 recipient_pk_hashes,
                 output_amounts,

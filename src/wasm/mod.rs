@@ -521,34 +521,8 @@ pub fn prove_wrapped_asset_burn(params: &JsValue) -> Result<JsValue, JsValue> {
     let custodian_pk_x = params.get("custodianPkX").and_then(|v| v.as_u64());
     let custodian_pk_y = params.get("custodianPkY").and_then(|v| v.as_u64());
     
-    // Create a circuit instance for WrappedAssetBurnCircuit
-    let circuit = WrappedAssetBurnCircuit {
-        input_utxo: UTXOTarget {
-            owner_pubkey_hash_target: vec![],
-            asset_id_target: vec![],
-            amount_target: Target::default(),
-            salt_target: vec![],
-        },
-        sender_pk: PublicKeyTarget {
-            point: PointTarget {
-                x: Target::default(),
-                y: Target::default(),
-            },
-        },
-        sender_sig: SignatureTarget {
-            r_point: PointTarget {
-                x: Target::default(),
-                y: Target::default(),
-            },
-            s_scalar: Target::default(),
-        },
-        destination_btc_address: vec![],
-        fee_quote: None,
-        custodian_pk: None,
-    };
-    
-    // Generate the proof using the instance method
-    let proof_result = circuit.generate_proof(
+    // Generate the proof using the static method
+    let proof_result = WrappedAssetBurnCircuit::generate_proof_static(
         &input_utxo_owner_pubkey_hash,
         &input_utxo_asset_id,
         input_utxo_amount,

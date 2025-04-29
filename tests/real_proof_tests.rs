@@ -78,7 +78,7 @@ mod real_proof_tests {
         };
         
         // Generate a proof without fee quote
-        let proof_result = circuit.generate_proof(
+        let proof_result = WrappedAssetBurnCircuit::generate_proof_static(
             &input_utxo_owner_pubkey_hash,
             &input_utxo_asset_id,
             input_utxo_amount,
@@ -173,7 +173,7 @@ mod real_proof_tests {
         };
         
         // Generate a proof
-        let proof_result = circuit.generate_proof(
+        let proof_result = TransferCircuit::generate_proof_static(
             input_utxos_data,
             recipient_pk_hashes,
             output_amounts,
