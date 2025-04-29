@@ -8,32 +8,38 @@ use crate::gadgets::hash_targets;
 
 /// Calculate a nullifier for a UTXO
 ///
-/// A nullifier is a unique identifier for a spent UTXO that prevents double-spending.
-/// It's calculated as hash(utxo_salt, user_sk) where user_sk is the user's secret key.
+/// This prevents double-spending by creating a unique nullifier
+/// based on salt and owner's secret key.
 pub fn calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-    utxo_salt: &[Target],
-    user_sk: Target,
+    salt: &[Target],
+    owner_sk: Target,
 ) -> Target {
-    // Combine salt and secret key
+    // Combine the salt and owner's secret key
     let mut inputs = Vec::new();
-    inputs.extend_from_slice(utxo_salt);
-    inputs.push(user_sk);
+    inputs.extend_from_slice(salt);
+    inputs.push(owner_sk);
     
-    // Hash the combined inputs
-    hash_targets(builder, &inputs)
+    // Hash the combined inputs to create the nullifier
+    let nullifier_hash = hash_targets(builder, &inputs);
+    
+    // Use the first element of the hash as the nullifier
+    nullifier_hash.elements[0]
 }
 
-/// Calculate and register a nullifier as a public input
+/// Calculate and register a nullifier for a UTXO
+///
+/// This prevents double-spending by creating a unique nullifier
+/// that is registered as a public input.
 pub fn calculate_and_register_nullifier<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-    utxo_salt: &[Target],
-    user_sk: Target,
+    salt: &[Target],
+    owner_sk: Target,
 ) -> Target {
     // Calculate the nullifier
-    let nullifier = calculate_nullifier(builder, utxo_salt, user_sk);
+    let nullifier = calculate_nullifier(builder, salt, owner_sk);
     
-    // Register it as a public input
+    // Register the nullifier as a public input
     builder.register_public_input(nullifier);
     
     nullifier
@@ -42,11 +48,11 @@ pub fn calculate_and_register_nullifier<F: RichField + Extendable<D>, const D: u
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::iop::witness::PartialWitness;
+    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use crate::core::HASH_SIZE;
+    use plonky2::field::types::Field;
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;
@@ -58,34 +64,32 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
-        // Create a salt and secret key
-        let salt: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        let sk = builder.add_virtual_target();
+        // Create inputs
+        let salt = builder.add_virtual_target();
+        let owner_sk = builder.add_virtual_target();
         
         // Calculate the nullifier
-        let nullifier = calculate_nullifier(&mut builder, &salt, sk);
-        
-        // Make the nullifier a public input
-        builder.register_public_input(nullifier);
+        let _nullifier = calculate_and_register_nullifier(&mut builder, &[salt], owner_sk);
         
         // Build the circuit
         let circuit = builder.build::<C>();
         
         // Create a witness
         let mut pw = PartialWitness::new();
-        // Set salt values
-        for (i, s) in salt.iter().enumerate() {
-            pw.set_target(*s, F::from_canonical_u64(i as u64));
-        }
-        // Set secret key
-        pw.set_target(sk, F::from_canonical_u64(123456));
+        
+        // Set the salt values
+        pw.set_target(salt, F::from_canonical_u64(0));
+        
+        // Set the owner secret key
+        pw.set_target(owner_sk, F::from_canonical_u64(42));
         
         // Generate the proof
         let proof = circuit.prove(pw).unwrap();
         
         // Verify the proof
-        circuit.verify(proof).unwrap();
+        circuit.verify(proof.clone()).unwrap();
+        
+        // Check that the nullifier is in the public inputs
+        assert_ne!(proof.public_inputs[0], F::ZERO);
     }
 }

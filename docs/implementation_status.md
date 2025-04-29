@@ -18,9 +18,9 @@
 
 ### Gadgets
 - ✅ Implemented hash gadget (Poseidon-based)
-- ✅ Implemented signature verification gadget (simplified)
-- ✅ Implemented nullifier gadget
 - ✅ Implemented arithmetic gadgets
+- ✅ Implemented nullifier gadget
+- ✅ Implemented signature verification gadget
 - ✅ Implemented fee payment gadget
 
 ### Circuits

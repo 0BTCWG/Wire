@@ -4,7 +4,8 @@
 // using the 0BTC Wire library.
 
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::iop::witness::PartialWitness;
+use plonky2::field::types::Field;
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
@@ -68,12 +69,12 @@ fn main() {
     
     // Create a transfer circuit
     let circuit = TransferCircuit {
-        input_utxos: vec![input_utxo],
+        input_utxos: vec![input_utxo.clone()],
         recipient_pk_hashes: vec![recipient_pk_hash],
         output_amounts: vec![output_amount],
         sender_pk,
         sender_sig,
-        fee_input_utxo,
+        fee_input_utxo: fee_input_utxo.clone(),
         fee_amount,
         fee_reservoir_address_hash,
     };
@@ -82,7 +83,7 @@ fn main() {
     let sender_sk = builder.add_virtual_target();
     
     // Build the circuit
-    let (output_utxos, fee_utxo, change_utxo) = circuit.build(&mut builder, sender_sk);
+    let (_output_utxos, _fee_utxo, _change_utxo) = circuit.build::<F, C, D>(&mut builder, sender_sk);
     
     // Build the circuit data
     let circuit_data = builder.build::<C>();

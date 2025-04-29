@@ -1,19 +1,26 @@
 // Hash gadgets for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
-use plonky2::hash::hash_types::RichField;
+use plonky2::hash::hash_types::{HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::core::HASH_SIZE;
+use crate::core::UTXOTarget;
 
 /// Hash a list of targets using Poseidon hash
 pub fn hash_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
-) -> Target {
+) -> HashOutTarget {
     // Use Plonky2's built-in Poseidon hash
-    builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec())[0]
+    builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec())
+}
+
+/// Get the first element of a hash output
+pub fn hash_to_target<F: RichField + Extendable<D>, const D: usize>(
+    hash_out: HashOutTarget,
+) -> Target {
+    hash_out.elements[0]
 }
 
 /// Hash a UTXO commitment
@@ -29,16 +36,19 @@ pub fn hash_utxo_commitment<F: RichField + Extendable<D>, const D: usize>(
     asset_id: &[Target],
     amount: Target,
     salt: &[Target],
-) -> Target {
-    // Combine all fields into a single vector
+) -> Vec<Target> {
+    // Concatenate all the inputs
     let mut inputs = Vec::new();
     inputs.extend_from_slice(owner_pubkey_hash);
     inputs.extend_from_slice(asset_id);
     inputs.push(amount);
     inputs.extend_from_slice(salt);
     
-    // Hash the combined inputs
-    hash_targets(builder, &inputs)
+    // Hash the inputs
+    let hash_result = hash_targets(builder, &inputs);
+    
+    // Return the hash elements as a vector
+    hash_result.elements.to_vec()
 }
 
 /// Calculate an asset ID from creator public key and nonce
@@ -58,22 +68,21 @@ pub fn calculate_asset_id<F: RichField + Extendable<D>, const D: usize>(
     inputs.push(max_supply);
     inputs.push(is_mintable);
     
-    // Hash the combined inputs and split into HASH_SIZE targets
-    let hash_result = hash_targets(builder, &inputs);
+    // Hash the combined inputs
+    let hash_out = hash_targets(builder, &inputs);
     
-    // Convert the single hash result into a vector of targets
-    // In a real implementation, we'd need to split this properly
-    // This is a simplified version
-    (0..HASH_SIZE).map(|_| builder.add_virtual_target()).collect()
+    // Convert the hash output to a vector of targets
+    hash_out.elements.to_vec()
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::iop::witness::PartialWitness;
+    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::field::goldilocks_field::GoldilocksField;
+    use plonky2::field::types::Field;
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;
@@ -93,7 +102,7 @@ mod tests {
         let hash_output = hash_targets(&mut builder, &[input1, input2]);
         
         // Make the hash output a public input
-        builder.register_public_input(hash_output);
+        builder.register_public_input(hash_output.elements[0]);
         
         // Build the circuit
         let circuit = builder.build::<C>();

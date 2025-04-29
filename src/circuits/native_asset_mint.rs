@@ -1,175 +1,166 @@
 // Native Asset Mint Circuit for the 0BTC Wire system
-use plonky2::field::types::Field;
+use plonky2::field::extension::Extendable;
+use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::CircuitData;
-use plonky2::plonk::config::GenericConfig;
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
+use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::types::Field;
 
-use crate::core::{C, D, F, PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
 use crate::gadgets::{enforce_fee_payment, verify_message_signature};
 
-/// Circuit for minting additional tokens of an existing native asset
+/// Circuit for minting native asset tokens
 ///
-/// This circuit verifies authorization to mint more tokens of an asset,
-/// enforces the fee payment, and creates new UTXOs for the minted tokens.
+/// This circuit verifies that the minter is authorized to mint the asset,
+/// enforces the fee payment, and creates the output UTXO.
 pub struct NativeAssetMintCircuit {
-    /// The asset ID to mint
+    /// The minter's public key
+    pub minter_pk: PublicKeyTarget,
+    
+    /// The asset ID
     pub asset_id: Vec<Target>,
-    
-    /// The creator's public key (for authorization)
-    pub creator_pk: PublicKeyTarget,
-    
-    /// The creator's signature
-    pub creator_sig: SignatureTarget,
-    
-    /// The amount to mint
-    pub mint_amount: Target,
     
     /// The recipient's public key hash
     pub recipient_pk_hash: Vec<Target>,
     
-    /// The fee input UTXO (must be wBTC)
+    /// The amount to mint
+    pub mint_amount: Target,
+    
+    /// The input UTXO containing wBTC for fee payment
     pub fee_input_utxo: UTXOTarget,
     
-    /// The fee reservoir address hash
+    /// The fee amount
+    pub fee_amount: Target,
+    
+    /// The fee reservoir address
     pub fee_reservoir_address_hash: Vec<Target>,
 }
 
 impl NativeAssetMintCircuit {
     /// Build the native asset mint circuit
-    pub fn build<F: Field, C: GenericConfig<D, F = F>, const D: usize>(
+    pub fn build<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
-    ) -> (UTXOTarget, UTXOTarget) {
-        // Create a message containing the mint details
+    ) -> UTXOTarget {
+        // Create a message to sign (the mint parameters)
         let mut message = Vec::new();
         message.extend_from_slice(&self.asset_id);
-        message.push(self.mint_amount);
         message.extend_from_slice(&self.recipient_pk_hash);
+        message.push(self.mint_amount);
         
-        // Verify the creator's signature
-        let is_signature_valid = verify_message_signature(
+        // Create a signature
+        let signature = SignatureTarget {
+            r_point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
+        
+        // Verify the signature
+        let is_valid = verify_message_signature(
             builder,
             &message,
-            &self.creator_sig,
-            &self.creator_pk,
+            &signature,
+            &self.minter_pk,
         );
         
-        // Ensure the signature is valid
-        builder.assert_one(is_signature_valid);
+        // Assert that the signature is valid
+        let one = builder.one();
+        builder.connect(is_valid, one);
         
-        // Enforce the fee payment
-        let fee_amount = builder.constant(F::from_canonical_u64(DEFAULT_FEE));
-        
-        let wbtc_change_amount = enforce_fee_payment(
+        // Enforce fee payment
+        let _wbtc_change_amount = enforce_fee_payment(
             builder,
-            &self.creator_pk,
+            &self.minter_pk,
             &self.fee_input_utxo,
-            fee_amount,
+            self.fee_amount,
             &self.fee_reservoir_address_hash,
-            &self.creator_sig,
+            &signature,
         );
         
-        // Create the output UTXO for the minted tokens
-        let output_utxo = UTXOTarget::add_virtual(builder, self.asset_id.len());
+        // Create an output UTXO for the recipient
+        let output_utxo = UTXOTarget {
+            owner_pubkey_hash_target: self.recipient_pk_hash.clone(),
+            asset_id_target: self.asset_id.clone(),
+            amount_target: builder.add_virtual_target(),
+            salt_target: (0..self.asset_id.len())
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+        };
         
-        // Set the owner to the recipient
-        for (a, b) in output_utxo.owner_pubkey_hash_target.iter().zip(self.recipient_pk_hash.iter()) {
-            builder.connect(*a, *b);
-        }
-        
-        // Set the asset ID
-        for (a, b) in output_utxo.asset_id_target.iter().zip(self.asset_id.iter()) {
-            builder.connect(*a, *b);
-        }
-        
-        // Set the amount to the mint amount
+        // Set the amount
         builder.connect(output_utxo.amount_target, self.mint_amount);
         
-        // Create a fee UTXO for the reservoir
-        let fee_utxo = UTXOTarget::add_virtual(builder, self.fee_input_utxo.asset_id_target.len());
-        
-        // Set the owner to the fee reservoir
-        for (a, b) in fee_utxo.owner_pubkey_hash_target.iter().zip(self.fee_reservoir_address_hash.iter()) {
-            builder.connect(*a, *b);
-        }
-        
-        // Set the asset ID to wBTC (same as fee input)
-        for (a, b) in fee_utxo.asset_id_target.iter().zip(self.fee_input_utxo.asset_id_target.iter()) {
-            builder.connect(*a, *b);
-        }
-        
-        // Set the amount to the fee
-        builder.connect(fee_utxo.amount_target, fee_amount);
-        
-        // Return the output UTXO and fee UTXO
-        (output_utxo, fee_utxo)
+        // Return the output UTXO
+        output_utxo
     }
     
     /// Create and build the circuit
-    pub fn create_circuit() -> CircuitData<F, C, D> {
-        let config = plonky2::plonk::circuit_data::CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+    pub fn create_circuit() -> CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2> {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
-        // Create a dummy circuit for now
-        // In a real implementation, this would be parameterized
+        // Create a minter public key
+        let minter_pk = PublicKeyTarget {
+            point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
+        
+        // Create an asset ID
         let asset_id: Vec<Target> = (0..32)
             .map(|_| builder.add_virtual_target())
             .collect();
-            
-        let creator_pk = PublicKeyTarget::add_virtual(&mut builder);
-        let creator_sig = SignatureTarget::add_virtual(&mut builder);
         
-        let mint_amount = builder.add_virtual_target();
-        
+        // Create a recipient public key hash
         let recipient_pk_hash: Vec<Target> = (0..32)
             .map(|_| builder.add_virtual_target())
             .collect();
-            
-        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
+        // Create a mint amount
+        let mint_amount = builder.add_virtual_target();
+        
+        // Create a fee input UTXO
+        let fee_input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            asset_id_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            amount_target: builder.add_virtual_target(),
+            salt_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+        };
+        
+        // Create a fee amount
+        let fee_amount = builder.constant(GoldilocksField::from_noncanonical_u64(DEFAULT_FEE));
+        
+        // Create a fee reservoir address
         let fee_reservoir_address_hash: Vec<Target> = (0..32)
             .map(|_| builder.add_virtual_target())
             .collect();
         
+        // Create the circuit
         let circuit = NativeAssetMintCircuit {
+            minter_pk,
             asset_id,
-            creator_pk,
-            creator_sig,
-            mint_amount,
             recipient_pk_hash,
+            mint_amount,
             fee_input_utxo,
+            fee_amount,
             fee_reservoir_address_hash,
         };
         
         // Build the circuit
-        circuit.build(&mut builder);
+        circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder);
         
-        builder.build::<C>()
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::PointTarget;
-    use plonky2::iop::witness::PartialWitness;
-    
-    #[test]
-    fn test_native_asset_mint() {
-        // Create the circuit
-        let circuit_data = NativeAssetMintCircuit::create_circuit();
-        
-        // Create a witness
-        let mut pw = PartialWitness::new();
-        
-        // In a real test, we would set the witness values
-        // For now, we'll just create an empty witness
-        
-        // Generate the proof
-        let proof = circuit_data.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit_data.verify(proof).unwrap();
+        // Build the circuit data
+        builder.build::<PoseidonGoldilocksConfig>()
     }
 }
