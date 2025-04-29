@@ -1,16 +1,20 @@
 // Gadgets for the 0BTC Wire system
 // These are reusable components for building ZK circuits
 
-mod hash;
-mod signature;
-mod nullifier;
-mod arithmetic;
-mod fee;
-mod ed25519;
+pub mod arithmetic;
+pub mod comparison;
+pub mod ed25519;
+pub mod fee;
+pub mod hash;
+pub mod merkle;
+pub mod nullifier;
+pub mod signature;
 
-pub use hash::*;
-pub use signature::*;
-pub use nullifier::*;
 pub use arithmetic::*;
-pub use fee::*;
+pub use comparison::*;
 pub use ed25519::*;
+pub use fee::*;
+pub use hash::*;
+pub use merkle::*;
+pub use nullifier::*;
+pub use signature::*;

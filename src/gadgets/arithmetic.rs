@@ -25,34 +25,6 @@ pub fn is_equal<F: RichField + Extendable<D>, const D: usize>(
     builder.select(diff_is_zero_bool, one, zero)
 }
 
-/// Check if a is less than b
-pub fn is_less_than<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    _a: Target,
-    _b: Target,
-) -> Target {
-    // For now, we'll implement a simplified version that always returns true
-    // In a real implementation, we would need to implement proper comparison logic
-    // using range checks and other constraints
-    
-    // Return 1 (true) for now to make the tests pass
-    builder.one()
-}
-
-/// Check if a is less than or equal to b
-pub fn is_less_than_or_equal<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    _a: Target,
-    _b: Target,
-) -> Target {
-    // For now, we'll implement a simplified version that always returns true
-    // In a real implementation, we would need to implement proper comparison logic
-    // using range checks and other constraints
-    
-    // Return 1 (true) for now to make the tests pass
-    builder.one()
-}
-
 /// Select between two targets based on a condition
 pub fn select<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
@@ -60,15 +32,15 @@ pub fn select<F: RichField + Extendable<D>, const D: usize>(
     when_true: Target,
     when_false: Target,
 ) -> Target {
-    // Create a constant
-    let one = builder.one();
+    // Create a zero constant
+    let zero = builder.zero();
     
-    // Convert condition to a boolean for selection
-    // If condition == 1, select when_true, otherwise select when_false
-    let condition_bool = builder.is_equal(condition, one);
+    // Check if condition is non-zero
+    let is_non_zero = builder.is_equal(condition, zero);
+    let is_true = builder.not(is_non_zero);
     
-    // Use the built-in select function
-    builder.select(condition_bool, when_true, when_false)
+    // Select based on the condition
+    builder.select(is_true, when_true, when_false)
 }
 
 /// Sum a list of targets
@@ -98,102 +70,48 @@ mod tests {
     use plonky2::field::types::Field;
     
     type F = GoldilocksField;
-    type C = PoseidonGoldilocksConfig;
     const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
     
     #[test]
     fn test_is_equal() {
-        // Create a new circuit
+        // Create a circuit
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
-        // Create two targets
+        // Create two inputs
         let a = builder.add_virtual_target();
         let b = builder.add_virtual_target();
         
-        // Check if they're equal
-        let is_eq = is_equal(&mut builder, a, b);
+        // Check if a == b
+        let result = is_equal(&mut builder, a, b);
         
-        // Make the result a public input
-        builder.register_public_input(is_eq);
+        // Register the result as a public input
+        builder.register_public_input(result);
         
         // Build the circuit
         let circuit = builder.build::<C>();
         
-        // Create a witness for equal values
+        // Test case 1: a == b (5 == 5)
         let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(123));
-        pw.set_target(b, F::from_canonical_u64(123));
+        pw.set_target(a, F::from_canonical_u64(5));
+        pw.set_target(b, F::from_canonical_u64(5));
         
-        // Generate the proof
         let proof = circuit.prove(pw).unwrap();
+        let public_inputs = proof.public_inputs;
         
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
+        // The result should be 1 (true)
+        assert_eq!(public_inputs[0], F::ONE);
         
-        // Check the public input (should be 1 for equal)
-        assert_eq!(proof.public_inputs[0], F::ONE);
-        
-        // Create a witness for unequal values
+        // Test case 2: a != b (5 != 10)
         let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(123));
-        pw.set_target(b, F::from_canonical_u64(456));
+        pw.set_target(a, F::from_canonical_u64(5));
+        pw.set_target(b, F::from_canonical_u64(10));
         
-        // Generate the proof
         let proof = circuit.prove(pw).unwrap();
+        let public_inputs = proof.public_inputs;
         
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check the public input (should be 0 for unequal)
-        assert_eq!(proof.public_inputs[0], F::ZERO);
-    }
-    
-    #[test]
-    fn test_is_less_than() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        
-        // Create two targets
-        let a = builder.add_virtual_target();
-        let b = builder.add_virtual_target();
-        
-        // Check if a < b
-        let is_lt = is_less_than(&mut builder, a, b);
-        
-        // Make the result a public input
-        builder.register_public_input(is_lt);
-        
-        // Build the circuit
-        let circuit = builder.build::<C>();
-        
-        // Create a witness for a < b
-        let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(123));
-        pw.set_target(b, F::from_canonical_u64(456));
-        
-        // Generate the proof
-        let proof = circuit.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check the public input (should be 1 for a < b)
-        assert_eq!(proof.public_inputs[0], F::ONE);
-        
-        // Create a witness for a > b
-        let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(456));
-        pw.set_target(b, F::from_canonical_u64(123));
-        
-        // Generate the proof
-        let proof = circuit.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check the public input (should be 1 for a > b)
-        assert_eq!(proof.public_inputs[0], F::ONE);
+        // The result should be 0 (false)
+        assert_eq!(public_inputs[0], F::ZERO);
     }
 }

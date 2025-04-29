@@ -1,11 +1,12 @@
-// Fee payment gadgets for the 0BTC Wire system
+// Fee enforcement gadgets for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::{PublicKeyTarget, UTXOTarget};
-use crate::gadgets::{is_less_than_or_equal, verify_message_signature};
+use crate::gadgets::comparison::is_less_than_or_equal;
+use crate::gadgets::verify_message_signature;
 
 /// Enforce fee payment for a transaction
 ///

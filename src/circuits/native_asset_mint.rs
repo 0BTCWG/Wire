@@ -1,15 +1,15 @@
 // Native Asset Mint Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
+use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
-use crate::gadgets::{enforce_fee_payment, verify_message_signature};
+use crate::gadgets::{verify_message_signature, enforce_fee_payment, hash_targets};
 
 /// Circuit for minting native asset tokens
 ///
@@ -36,6 +36,9 @@ pub struct NativeAssetMintCircuit {
     
     /// The fee reservoir address
     pub fee_reservoir_address_hash: Vec<Target>,
+    
+    /// The signature for verifying ownership
+    pub signature: SignatureTarget,
 }
 
 impl NativeAssetMintCircuit {
@@ -50,20 +53,11 @@ impl NativeAssetMintCircuit {
         message.extend_from_slice(&self.recipient_pk_hash);
         message.push(self.mint_amount);
         
-        // Create a signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
-        
         // Verify the signature
         let is_valid = verify_message_signature(
             builder,
             &message,
-            &signature,
+            &self.signature,
             &self.minter_pk,
         );
         
@@ -78,24 +72,31 @@ impl NativeAssetMintCircuit {
             &self.fee_input_utxo,
             self.fee_amount,
             &self.fee_reservoir_address_hash,
-            &signature,
+            &self.signature,
         );
         
-        // Create an output UTXO for the recipient
-        let output_utxo = UTXOTarget {
+        // Create a new UTXO for the minted tokens
+        let minted_utxo = UTXOTarget {
             owner_pubkey_hash_target: self.recipient_pk_hash.clone(),
             asset_id_target: self.asset_id.clone(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..self.asset_id.len())
+            amount_target: self.mint_amount,
+            salt_target: (0..32)
                 .map(|_| builder.add_virtual_target())
                 .collect(),
         };
         
-        // Set the amount
-        builder.connect(output_utxo.amount_target, self.mint_amount);
+        // Generate a random salt for the minted UTXO
+        // In a real implementation, this would be a secure random value
+        // For now, we'll just use a simple hash of the message
+        let salt_hash = hash_targets(builder, &message);
+        for (i, target) in minted_utxo.salt_target.iter().enumerate() {
+            if i < salt_hash.elements.len() {
+                builder.connect(*target, salt_hash.elements[i]);
+            }
+        }
         
-        // Return the output UTXO
-        output_utxo
+        // Return the minted UTXO
+        minted_utxo
     }
     
     /// Create and build the circuit
@@ -139,12 +140,21 @@ impl NativeAssetMintCircuit {
         };
         
         // Create a fee amount
-        let fee_amount = builder.constant(GoldilocksField::from_noncanonical_u64(DEFAULT_FEE));
+        let fee_amount = builder.add_virtual_target();
         
         // Create a fee reservoir address
         let fee_reservoir_address_hash: Vec<Target> = (0..32)
             .map(|_| builder.add_virtual_target())
             .collect();
+        
+        // Create a signature
+        let signature = SignatureTarget {
+            r_point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
         
         // Create the circuit
         let circuit = NativeAssetMintCircuit {
@@ -155,6 +165,7 @@ impl NativeAssetMintCircuit {
             fee_input_utxo,
             fee_amount,
             fee_reservoir_address_hash,
+            signature,
         };
         
         // Build the circuit
@@ -162,5 +173,184 @@ impl NativeAssetMintCircuit {
         
         // Build the circuit data
         builder.build::<PoseidonGoldilocksConfig>()
+    }
+    
+    /// Generate a proof for the native asset mint circuit
+    pub fn generate_proof_static(
+        minter_pk_x: u64,
+        minter_pk_y: u64,
+        asset_id: Vec<u8>,
+        recipient_pk_hash: Vec<u8>,
+        mint_amount: u64,
+        signature_r_x: u64,
+        signature_r_y: u64,
+        signature_s: u64,
+        fee_input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
+        fee_amount: u64,
+        fee_reservoir_address_hash: Vec<u8>,
+    ) -> Result<crate::core::proof::SerializableProof, crate::core::proof::ProofError> {
+        use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+        use crate::core::proof::{serialize_proof, ProofError};
+        
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        let mut pw = PartialWitness::new();
+        
+        // Create a new circuit builder for virtual targets
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Set minter public key
+        let minter_pk = PublicKeyTarget {
+            point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
+        pw.set_target(minter_pk.point.x, GoldilocksField::from_canonical_u64(minter_pk_x));
+        pw.set_target(minter_pk.point.y, GoldilocksField::from_canonical_u64(minter_pk_y));
+        
+        // Set asset ID
+        let asset_id_targets: Vec<Target> = (0..asset_id.len())
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        for (i, byte) in asset_id.iter().enumerate() {
+            if i < asset_id_targets.len() {
+                pw.set_target(
+                    asset_id_targets[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Set recipient public key hash
+        let recipient_pk_hash_targets: Vec<Target> = (0..recipient_pk_hash.len())
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        for (i, byte) in recipient_pk_hash.iter().enumerate() {
+            if i < recipient_pk_hash_targets.len() {
+                pw.set_target(
+                    recipient_pk_hash_targets[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Set mint amount
+        let mint_amount_target = builder.add_virtual_target();
+        pw.set_target(mint_amount_target, GoldilocksField::from_canonical_u64(mint_amount));
+        
+        // Set signature
+        let signature = SignatureTarget {
+            r_point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
+        pw.set_target(signature.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
+        pw.set_target(signature.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
+        pw.set_target(signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
+        
+        // Create fee input UTXO
+        let (fee_owner_pubkey_hash, fee_asset_id, fee_amount_value, fee_salt) = &fee_input_utxo_data;
+        let fee_input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: (0..fee_owner_pubkey_hash.len())
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            asset_id_target: (0..fee_asset_id.len())
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            amount_target: builder.add_virtual_target(),
+            salt_target: (0..fee_salt.len())
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+        };
+        
+        // Set fee input UTXO values
+        for (i, byte) in fee_owner_pubkey_hash.iter().enumerate() {
+            if i < fee_input_utxo.owner_pubkey_hash_target.len() {
+                pw.set_target(
+                    fee_input_utxo.owner_pubkey_hash_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        for (i, byte) in fee_asset_id.iter().enumerate() {
+            if i < fee_input_utxo.asset_id_target.len() {
+                pw.set_target(
+                    fee_input_utxo.asset_id_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        pw.set_target(fee_input_utxo.amount_target, GoldilocksField::from_canonical_u64(*fee_amount_value));
+        for (i, byte) in fee_salt.iter().enumerate() {
+            if i < fee_input_utxo.salt_target.len() {
+                pw.set_target(
+                    fee_input_utxo.salt_target[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Set fee amount
+        let fee_amount_target = builder.add_virtual_target();
+        pw.set_target(fee_amount_target, GoldilocksField::from_canonical_u64(fee_amount));
+        
+        // Set fee reservoir address hash
+        let fee_reservoir_address_hash_targets: Vec<Target> = (0..fee_reservoir_address_hash.len())
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        for (i, byte) in fee_reservoir_address_hash.iter().enumerate() {
+            if i < fee_reservoir_address_hash_targets.len() {
+                pw.set_target(
+                    fee_reservoir_address_hash_targets[i],
+                    GoldilocksField::from_canonical_u64(*byte as u64),
+                );
+            }
+        }
+        
+        // Create the circuit
+        let circuit = NativeAssetMintCircuit {
+            minter_pk,
+            asset_id: asset_id_targets,
+            recipient_pk_hash: recipient_pk_hash_targets,
+            mint_amount: mint_amount_target,
+            fee_input_utxo,
+            fee_amount: fee_amount_target,
+            fee_reservoir_address_hash: fee_reservoir_address_hash_targets,
+            signature,
+        };
+        
+        // Build the circuit
+        circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder);
+        
+        // Build the circuit data
+        let circuit_data = builder.build::<PoseidonGoldilocksConfig>();
+        
+        // Generate the proof
+        let proof = crate::core::proof::generate_proof(&circuit_data, pw)
+            .map_err(|e| ProofError::ProofGenerationError(format!("{:?}", e)))?;
+        
+        // Serialize the proof
+        serialize_proof(&proof)
+    }
+    
+    /// Verify a proof for the native asset mint circuit
+    pub fn verify_proof(serialized_proof: &crate::core::proof::SerializableProof) -> Result<(), crate::core::proof::ProofError> {
+        use crate::core::proof::deserialize_proof;
+        
+        // Create the circuit
+        let circuit_data = Self::create_circuit();
+        
+        // Deserialize the proof
+        let proof = deserialize_proof(serialized_proof)?;
+        
+        // Verify the proof
+        crate::core::proof::verify_proof(&circuit_data, &proof)
     }
 }

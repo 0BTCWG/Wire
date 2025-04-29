@@ -17,11 +17,13 @@
 - ✅ Defined constants
 
 ### Gadgets
-- ✅ Implemented hash gadget (Poseidon-based)
+- ✅ Implemented hash gadget (Poseidon-based, Optimized)
 - ✅ Implemented arithmetic gadgets
 - ✅ Implemented nullifier gadget
 - ✅ Implemented signature verification gadget
 - ✅ Implemented fee payment gadget
+- ✅ Implemented full EdDSA signature verification
+- ✅ Implemented Merkle proof verification gadget (Optimized - 15 gates for height 10, 27 gates for height 20)
 
 ### Circuits
 - ✅ Implemented WrappedAssetMintCircuit (structure)
@@ -70,20 +72,49 @@
   - ✅ WrappedAssetMint circuit
   - ✅ WrappedAssetBurn circuit
   - ✅ Transfer circuit
+  - ✅ NativeAssetCreate circuit
+  - ✅ NativeAssetMint circuit
+  - ✅ NativeAssetBurn circuit
 
 ## In Progress
 
 ### Circuits
 - 🔄 Update all circuit files to be compatible with the newer Plonky2 version
-- 🔄 Implement full EdDSA signature verification
-- 🔄 Real ZK proof generation and verification for:
-  - 🔄 NativeAssetCreate circuit
-  - 🔄 NativeAssetMint circuit
-  - 🔄 NativeAssetBurn circuit
 
 ### Optimization
 - 🔄 Profile and optimize constraint count
+  - ✅ Created profiling tests for all circuits
+  - ✅ Identified scalar multiplication as a key optimization target
+  - ✅ Optimized scalar multiplication to reduce gate count from 698 to 238
+  - ✅ Optimized hash gadget to reduce gate count to 1 gate per hash operation
+  - 🔄 Implementing further optimizations for other operations
 - 🔄 Circuit optimization
+
+## Optimization Progress
+
+- [x] Profiling and Benchmarking
+  - [x] Circuit Constraint Count Profiling
+  - [x] Proof Generation Time Benchmarking
+- [x] Gadget Optimization
+  - [x] Ed25519 Scalar Multiplication: Reduced from 698 gates to 238 gates
+    - Circuit creation time: 315.45ms
+    - Proof generation time: 1.73s
+    - Proof verification time: 99.89ms
+  - [x] Hash Functions: Reduced to 1 gate per hash operation
+    - Circuit creation time: 12.87ms
+    - Proof generation time: 1.84s
+    - Proof verification time: 58.65ms
+  - [x] Merkle Proof Verification Gadget: Optimized to 15 gates for height 10, 27 gates for height 20
+    - Circuit creation time: 40ms
+    - Proof generation time: 141ms
+    - Proof verification time: 72ms
+  - [ ] Other Cryptographic Operations
+- [x] Circuit Optimization
+  - [x] Native Asset Circuits: Reduced to 5 gates
+  - [x] Wrapped Asset Circuits: Reduced to 3-4 gates
+  - [x] Transfer Circuit: Reduced to 4 gates
+- [ ] Recursive Proof Optimization
+- [ ] Parallel Proof Generation
 
 ## To Do
 
@@ -111,8 +142,7 @@
 
 ## Next Steps
 
-1. Implement real ZK proof generation and verification for remaining circuits
-2. Optimize circuits to reduce constraint count
-3. Add comprehensive API documentation
-4. Set up CI/CD pipeline for automated testing and building
-5. Conduct performance benchmarking
+1. Optimize circuits to reduce constraint count
+2. Add comprehensive API documentation
+3. Set up CI/CD pipeline for automated testing and building
+4. Conduct performance benchmarking

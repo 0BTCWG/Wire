@@ -346,36 +346,8 @@ pub fn prove_transfer(params: &JsValue) -> Result<JsValue, JsValue> {
     let nonce = params["nonce"].as_u64()
         .ok_or_else(|| JsValue::from_str("Missing or invalid nonce"))?;
     
-    // Create a circuit instance for TransferCircuit
-    let circuit = TransferCircuit {
-        input_utxos: vec![],
-        recipient_pk_hashes: vec![],
-        output_amounts: vec![],
-        sender_pk: PublicKeyTarget {
-            point: PointTarget {
-                x: Target::default(),
-                y: Target::default(),
-            },
-        },
-        sender_sig: SignatureTarget {
-            r_point: PointTarget {
-                x: Target::default(),
-                y: Target::default(),
-            },
-            s_scalar: Target::default(),
-        },
-        fee_input_utxo: UTXOTarget {
-            owner_pubkey_hash_target: vec![],
-            asset_id_target: vec![],
-            amount_target: Target::default(),
-            salt_target: vec![],
-        },
-        fee_amount: Target::default(),
-        fee_reservoir_address_hash: vec![],
-    };
-    
-    // Generate the proof using the instance method
-    let proof_result = circuit.generate_proof(
+    // Generate the proof using the static method
+    let proof_result = TransferCircuit::generate_proof_static(
         input_utxos_data,
         recipient_pk_hashes,
         output_amounts,

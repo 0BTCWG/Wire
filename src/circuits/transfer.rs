@@ -9,9 +9,11 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
+use plonky2::plonk::prover::prove;
 
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
+use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
 use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
+use crate::gadgets::comparison::is_less_than_or_equal;
 use crate::gadgets::{calculate_and_register_nullifier, enforce_fee_payment, sum, verify_message_signature};
 
 /// Circuit for transferring assets between UTXOs
@@ -103,11 +105,7 @@ impl TransferCircuit {
         let output_sum = sum(builder, &self.output_amounts);
         
         // Verify conservation of value: input_sum >= output_sum
-        let is_conserved = crate::gadgets::is_less_than_or_equal(
-            builder,
-            output_sum,
-            input_sum,
-        );
+        let is_conserved = is_less_than_or_equal(builder, output_sum, input_sum);
         builder.assert_one(is_conserved);
         
         // Handle fee payment
@@ -215,7 +213,8 @@ impl TransferCircuit {
         
         let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
-        let fee_amount = builder.constant(GoldilocksField::from_canonical_u64(DEFAULT_FEE));
+        // Use a virtual target for fee_amount instead of a constant
+        let fee_amount = builder.add_virtual_target();
         
         let fee_reservoir_address_hash: Vec<Target> = (0..32)
             .map(|_| builder.add_virtual_target())
