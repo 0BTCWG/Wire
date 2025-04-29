@@ -6,9 +6,9 @@
 pub mod core;
 pub mod gadgets;
 pub mod circuits;
-
-#[cfg(feature = "wasm")]
+pub mod cli;
 pub mod wasm;
+pub mod utils;
 
 use log::info;
 

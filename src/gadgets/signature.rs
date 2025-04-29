@@ -4,7 +4,7 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::core::{PublicKeyTarget, SignatureTarget};
+use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget};
 use crate::gadgets::{hash_targets, is_equal};
 use crate::gadgets::ed25519::{is_on_curve, optimized_scalar_multiply, point_add, get_base_point};
 

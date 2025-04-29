@@ -1,0 +1,158 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>0BTC Wire WASM Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <style>
+        body {
+            padding-top: 2rem;
+            padding-bottom: 2rem;
+        }
+        .header {
+            margin-bottom: 2rem;
+            border-bottom: 1px solid #e5e5e5;
+            padding-bottom: 1rem;
+        }
+        .card {
+            margin-bottom: 1.5rem;
+        }
+        #output-console {
+            height: 300px;
+            overflow-y: auto;
+            background-color: #f8f9fa;
+            padding: 1rem;
+            border-radius: 0.25rem;
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        .error {
+            color: #dc3545;
+        }
+        .section-title {
+            margin-top: 2rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>0BTC Wire WASM Demo</h1>
+            <p class="lead">This demo showcases the WASM integration for the 0BTC Wire zero-knowledge proof system.</p>
+        </div>
+
+        <div class="row">
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Key Management</h5>
+                    </div>
+                    <div class="card-body">
+                        <button id="generate-keypair" class="btn btn-primary mb-3">Generate Keypair</button>
+                        
+                        <h6 class="mt-4">Sign Message</h6>
+                        <div class="mb-3">
+                            <label for="secret-key" class="form-label">Secret Key</label>
+                            <input type="text" class="form-control" id="secret-key" placeholder="0x...">
+                        </div>
+                        <div class="mb-3">
+                            <label for="message" class="form-label">Message</label>
+                            <input type="text" class="form-control" id="message" placeholder="Hello, Wire!">
+                        </div>
+                        <button id="sign-message" class="btn btn-primary">Sign Message</button>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Transfer Proof</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="sender-pk" class="form-label">Sender Public Key</label>
+                            <input type="text" class="form-control" id="sender-pk" placeholder="0x...">
+                        </div>
+                        <div class="mb-3">
+                            <label for="sender-sig" class="form-label">Sender Signature</label>
+                            <input type="text" class="form-control" id="sender-sig" placeholder="0x...">
+                        </div>
+                        <div class="mb-3">
+                            <label for="input-utxo" class="form-label">Input UTXO</label>
+                            <textarea class="form-control" id="input-utxo" rows="3" placeholder='{"owner_pubkey_hash":"0x...","asset_id":"0x...","amount":100,"salt":"0x..."}'></textarea>
+                        </div>
+                        <div class="mb-3">
+                            <label for="recipient-pk-hash" class="form-label">Recipient Public Key Hash</label>
+                            <input type="text" class="form-control" id="recipient-pk-hash" placeholder="0x...">
+                        </div>
+                        <div class="mb-3">
+                            <label for="amount" class="form-label">Amount</label>
+                            <input type="number" class="form-control" id="amount" placeholder="50">
+                        </div>
+                        <button id="prove-transfer" class="btn btn-primary">Generate Proof</button>
+                        <button id="verify-proof" class="btn btn-success ms-2">Verify Proof</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Recursive Proof Aggregation</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label for="proof-count" class="form-label">Number of Proofs</label>
+                            <input type="number" class="form-control" id="proof-count" value="4" min="2" max="16">
+                        </div>
+                        <button id="aggregate-proofs" class="btn btn-primary">Aggregate Proofs</button>
+                        <button id="verify-aggregated" class="btn btn-success ms-2">Verify Aggregated</button>
+                        
+                        <div class="alert alert-info mt-3">
+                            <strong>Note:</strong> This demo will generate multiple transfer proofs and aggregate them into a single proof using recursive proof aggregation.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card">
+                    <div class="card-header">
+                        <h5>Console Output</h5>
+                    </div>
+                    <div class="card-body">
+                        <div id="output-console"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="row mt-4">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5>About 0BTC Wire</h5>
+                    </div>
+                    <div class="card-body">
+                        <p>0BTC Wire is a zero-knowledge UTXO system that enables private and scalable transactions. It uses Plonky2 for efficient proof generation and verification.</p>
+                        <p>Key features:</p>
+                        <ul>
+                            <li>Optimized hash function gadgets</li>
+                            <li>Parallel proof generation</li>
+                            <li>Recursive proof aggregation</li>
+                            <li>WASM integration for browser-based applications</li>
+                        </ul>
+                        <p>This demo showcases the WASM integration and recursive proof aggregation features.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Load the Wire WASM module -->
+    <!-- In a real application, you would include the actual WASM module -->
+    <!-- <script src="./wire_wasm.js"></script> -->
+    
+    <!-- Load the demo script -->
+    <script src="./wasm_demo.js"></script>
+</body>
+</html>

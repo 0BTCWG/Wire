@@ -9,9 +9,18 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2_field::types::Field;
 use plonky2::iop::target::Target;
+use plonky2::plonk::proof::ProofWithPublicInputs;
 use wire_lib::core::UTXO;
 use wire_lib::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
 use wire_lib::core::proof::SerializableProof;
+use wire_lib::utils::{
+    aggregate_proofs,
+    verify_aggregated_proof,
+    RecursiveProverOptions,
+    generate_proofs_in_parallel,
+    verify_proofs_in_parallel,
+    ParallelProverOptions,
+};
 use wire_lib::circuits::{
     WrappedAssetMintCircuit, 
     WrappedAssetBurnCircuit, 
@@ -21,17 +30,98 @@ use wire_lib::circuits::{
     NativeAssetBurnCircuit
 };
 
+#[derive(Parser)]
+#[command(name = "wire")]
+#[command(about = "0BTC Wire - Zero-Knowledge UTXO System", long_about = None)]
+#[command(version)]
+pub struct Cli {
+    #[command(subcommand)]
+    pub command: Commands,
+}
+
+#[derive(Subcommand)]
+pub enum Commands {
+    /// Generate a new keypair
+    KeyGen {
+        /// Output file for the keypair
+        #[arg(short, long)]
+        output: Option<String>,
+    },
+    /// Prove a circuit
+    Prove {
+        /// Type of circuit to prove
+        #[arg(short, long)]
+        circuit: String,
+        
+        /// Input file with circuit parameters
+        #[arg(short, long)]
+        input: String,
+        
+        /// Output file for the proof
+        #[arg(short, long)]
+        output: String,
+        
+        /// Use parallel proof generation if possible
+        #[arg(short, long)]
+        parallel: bool,
+    },
+    /// Verify a proof
+    Verify {
+        /// Type of circuit to verify
+        #[arg(short, long)]
+        circuit: String,
+        
+        /// Proof file to verify
+        #[arg(short, long)]
+        proof: String,
+    },
+    /// Aggregate multiple proofs into a single proof
+    Aggregate {
+        /// Directory containing proof files to aggregate
+        #[arg(short, long)]
+        input_dir: String,
+        
+        /// Output file for the aggregated proof
+        #[arg(short, long)]
+        output: String,
+        
+        /// Maximum number of proofs to aggregate in a single step
+        #[arg(short, long, default_value = "4")]
+        batch_size: usize,
+        
+        /// Whether to use verbose output
+        #[arg(short, long)]
+        verbose: bool,
+    },
+    /// Verify an aggregated proof
+    VerifyAggregated {
+        /// Aggregated proof file to verify
+        #[arg(short, long)]
+        proof: String,
+        
+        /// Type of circuit used in the original proofs
+        #[arg(short, long)]
+        circuit: String,
+    },
+}
+
 /// Parse command line arguments and execute the appropriate command
-pub fn execute_command(command: &crate::Cli) -> Result<(), String> {
+pub fn execute_command(command: &Cli) -> Result<(), String> {
     match &command.command {
-        crate::Commands::KeyGen { output } => {
+        Commands::KeyGen { output } => {
             generate_keypair(output)
         },
-        crate::Commands::Prove { circuit, input, output } => {
-            prove_circuit(circuit, input, output)
+        Commands::Prove { circuit, input, output, parallel } => {
+            prove_circuit(circuit, input, output, *parallel)
         },
-        crate::Commands::Verify { circuit, proof } => {
+        Commands::Verify { circuit, proof } => {
             verify_proof(circuit, proof)
+        },
+        Commands::Aggregate { input_dir, output, batch_size, verbose } => {
+            aggregate_proofs_cli(input_dir, output, *batch_size, *verbose)
+        },
+        Commands::VerifyAggregated { proof, circuit } => {
+            verify_aggregated_proof_cli(proof, circuit)
         },
     }
 }
@@ -75,7 +165,7 @@ fn generate_keypair(output: &Option<String>) -> Result<(), String> {
 }
 
 /// Prove a circuit with the given input parameters
-fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str) -> Result<(), String> {
+fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, use_parallel: bool) -> Result<(), String> {
     info!("Proving circuit: {}", circuit_type);
     
     // Read the input file
@@ -667,4 +757,168 @@ fn extract_utxos(json: &serde_json::Value, key: &str) -> Result<Vec<UTXO>, Strin
     }
     
     Ok(result)
+}
+
+/// Aggregate multiple proofs into a single proof
+pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usize, verbose: bool) -> Result<(), String> {
+    println!("Aggregating proofs from directory: {}", input_dir);
+    
+    // Check if input directory exists
+    let input_dir_path = Path::new(input_dir);
+    if !input_dir_path.exists() || !input_dir_path.is_dir() {
+        return Err(format!("Input directory does not exist: {}", input_dir));
+    }
+    
+    // Load proofs from files
+    let mut proofs = Vec::new();
+    let mut circuit_type = None;
+    
+    for entry in fs::read_dir(input_dir_path).map_err(|e| format!("Failed to read directory: {}", e))? {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+        
+        if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
+            // Read the proof file
+            let proof_json = fs::read_to_string(&path)
+                .map_err(|e| format!("Failed to read proof file {}: {}", path.display(), e))?;
+            
+            // Parse the proof
+            let proof_value: serde_json::Value = serde_json::from_str(&proof_json)
+                .map_err(|e| format!("Failed to parse proof JSON from {}: {}", path.display(), e))?;
+            
+            // Extract circuit type if not already set
+            if circuit_type.is_none() {
+                if let Some(ct) = proof_value.get("circuit_type").and_then(|v| v.as_str()) {
+                    circuit_type = Some(ct.to_string());
+                } else {
+                    return Err(format!("Proof file {} does not contain circuit_type", path.display()));
+                }
+            }
+            
+            // Convert to SerializableProof
+            let serializable_proof: SerializableProof = serde_json::from_value(proof_value)
+                .map_err(|e| format!("Failed to convert proof from {}: {}", path.display(), e))?;
+            
+            // Create a dummy circuit to get common data for conversion
+            let circuit = create_dummy_circuit(circuit_type.as_ref().unwrap())?;
+            
+            // Convert to ProofWithPublicInputs
+            let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
+                .map_err(|e| format!("Failed to convert proof from {}: {}", path.display(), e))?;
+            
+            proofs.push(proof);
+            
+            if verbose {
+                println!("Loaded proof from: {}", path.display());
+            }
+        }
+    }
+    
+    if proofs.is_empty() {
+        return Err("No proof files found in the input directory".to_string());
+    }
+    
+    println!("Loaded {} proofs", proofs.len());
+    
+    // Aggregate the proofs
+    let options = RecursiveProverOptions {
+        verbose,
+        max_proofs_per_step: Some(batch_size),
+    };
+    
+    println!("Aggregating proofs with batch size: {}", batch_size);
+    let result = aggregate_proofs(proofs, options)
+        .map_err(|e| format!("Failed to aggregate proofs: {}", e))?;
+    
+    println!("Successfully aggregated {} proofs", result.num_proofs);
+    println!("Aggregation time: {:?}", result.generation_time);
+    
+    // Convert back to SerializableProof
+    let serializable = SerializableProof::from(result.proof);
+    
+    // Add circuit type to the serialized proof
+    let mut proof_value = serde_json::to_value(&serializable)
+        .map_err(|e| format!("Failed to serialize aggregated proof: {}", e))?;
+    
+    if let Some(obj) = proof_value.as_object_mut() {
+        obj.insert("circuit_type".to_string(), serde_json::Value::String(circuit_type.unwrap()));
+        obj.insert("num_aggregated_proofs".to_string(), serde_json::Value::Number(serde_json::Number::from(result.num_proofs)));
+    }
+    
+    // Save to output file
+    let json = serde_json::to_string_pretty(&proof_value)
+        .map_err(|e| format!("Failed to serialize aggregated proof: {}", e))?;
+    
+    fs::write(output_path, json)
+        .map_err(|e| format!("Failed to write aggregated proof to {}: {}", output_path, e))?;
+    
+    println!("Saved aggregated proof to: {}", output_path);
+    
+    Ok(())
+}
+
+/// Verify an aggregated proof
+pub fn verify_aggregated_proof_cli(proof_path: &str, circuit_type: &str) -> Result<(), String> {
+    println!("Verifying aggregated proof: {}", proof_path);
+    
+    // Check if proof file exists
+    let proof_path = Path::new(proof_path);
+    if !proof_path.exists() || !proof_path.is_file() {
+        return Err(format!("Proof file does not exist: {}", proof_path.display()));
+    }
+    
+    // Read the proof file
+    let proof_json = fs::read_to_string(proof_path)
+        .map_err(|e| format!("Failed to read proof file: {}", e))?;
+    
+    // Parse the proof
+    let proof_value: serde_json::Value = serde_json::from_str(&proof_json)
+        .map_err(|e| format!("Failed to parse proof JSON: {}", e))?;
+    
+    // Extract number of aggregated proofs
+    let num_aggregated = proof_value.get("num_aggregated_proofs")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(1);
+    
+    // Convert to SerializableProof
+    let serializable_proof: SerializableProof = serde_json::from_value(proof_value)
+        .map_err(|e| format!("Failed to convert proof: {}", e))?;
+    
+    // Create a dummy circuit for verification
+    let circuit = create_dummy_circuit(circuit_type)?;
+    
+    // Convert to ProofWithPublicInputs
+    let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
+        .map_err(|e| format!("Failed to convert proof: {}", e))?;
+    
+    // Verify the aggregated proof
+    let start = std::time::Instant::now();
+    let verified_count = verify_aggregated_proof(&proof, &circuit)
+        .map_err(|e| format!("Failed to verify aggregated proof: {}", e))?;
+    let verification_time = start.elapsed();
+    
+    println!("Verification successful!");
+    println!("Verified {} proofs in {:?}", verified_count, verification_time);
+    println!("Verification throughput: {:.2} proofs/second", 
+        verified_count as f64 / verification_time.as_secs_f64());
+    
+    Ok(())
+}
+
+/// Create a dummy circuit for proof conversion and verification
+fn create_dummy_circuit(circuit_type: &str) -> Result<plonky2::plonk::circuit_data::CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2>, String> {
+    use plonky2::plonk::circuit_builder::CircuitBuilder;
+    use plonky2::plonk::circuit_data::CircuitConfig;
+    
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+    
+    // Add a dummy target
+    let target = builder.add_virtual_target();
+    builder.register_public_input(target);
+    
+    // Build the circuit
+    let circuit = builder.build::<PoseidonGoldilocksConfig>();
+    
+    Ok(circuit)
 }

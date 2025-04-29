@@ -7,6 +7,10 @@ mod constraint_profiling_tests {
     
     use wire_lib::gadgets::ed25519::estimate_scalar_multiply_complexity;
     use wire_lib::gadgets::hash::count_hash_gates;
+    use wire_lib::gadgets::hash::count_hash_n_gates;
+    use wire_lib::gadgets::hash::count_utxo_hash_gates;
+    use wire_lib::gadgets::hash::count_optimized_hash_gates;
+    use wire_lib::gadgets::hash::count_optimized_utxo_hash_gates;
     use wire_lib::circuits::native_asset_create::NativeAssetCreateCircuit;
     use wire_lib::circuits::native_asset_mint::NativeAssetMintCircuit;
     use wire_lib::circuits::native_asset_burn::NativeAssetBurnCircuit;
@@ -33,9 +37,38 @@ mod constraint_profiling_tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
-        let gate_count = count_hash_gates(&mut builder);
+        // Test single input hash
+        let single_gate_count = count_hash_gates(&mut builder);
+        println!("Single input hash operation gate count: {}", single_gate_count);
         
-        println!("Hash operation gate count: {}", gate_count);
+        // Test multiple input hash with different sizes
+        let input_sizes = [2, 4, 8, 16];
+        for &size in &input_sizes {
+            let config = CircuitConfig::standard_recursion_config();
+            let mut builder = CircuitBuilder::<F, D>::new(config);
+            let gate_count = count_hash_n_gates(&mut builder, size);
+            println!("Hash operation with {} inputs gate count: {}", size, gate_count);
+            println!("Average gates per input: {}", gate_count as f64 / size as f64);
+        }
+        
+        // Test UTXO commitment hash
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let utxo_gate_count = count_utxo_hash_gates(&mut builder);
+        println!("UTXO commitment hash operation gate count: {}", utxo_gate_count);
+        
+        // Test optimized hash operations
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let optimized_gate_count = count_optimized_hash_gates(&mut builder);
+        println!("Optimized hash operation gate count: {}", optimized_gate_count);
+        
+        // Test optimized UTXO hash
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let optimized_utxo_gate_count = count_optimized_utxo_hash_gates(&mut builder);
+        println!("Optimized UTXO hash operation gate count: {}", optimized_utxo_gate_count);
+        
         // This is just a profiling test, so we don't need to assert anything
     }
     

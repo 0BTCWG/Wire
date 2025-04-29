@@ -9,6 +9,8 @@ use rand::{rngs::OsRng, RngCore};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer};
 use serde_wasm_bindgen;
 use plonky2::iop::target::Target;
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use plonky2::field::goldilocks_field::GoldilocksField;
 
 use crate::circuits::wrapped_asset_mint::WrappedAssetMintCircuit;
 use crate::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
@@ -20,6 +22,11 @@ use crate::core::proof::SerializableProof;
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
 use crate::circuits::wrapped_asset_mint::SignedAttestationTarget;
 use crate::circuits::wrapped_asset_burn::SignedQuoteTarget;
+use crate::utils::{
+    aggregate_proofs,
+    verify_aggregated_proof,
+    RecursiveProverOptions,
+};
 
 // Initialize the WASM module
 #[wasm_bindgen(start)]
@@ -799,4 +806,181 @@ fn verify_proof_structure(proof: &js_sys::Object) -> Result<bool, JsValue> {
     
     // All checks passed
     Ok(true)
+}
+
+// Aggregate multiple proofs into a single proof
+#[wasm_bindgen]
+pub fn aggregate_proofs(
+    proofs_array: JsValue,
+    options_js: JsValue,
+) -> Result<JsValue, JsValue> {
+    console::log_1(&JsValue::from_str("Aggregating proofs..."));
+    
+    // Parse options
+    let options_obj: js_sys::Object = options_js.dyn_into()
+        .map_err(|_| JsValue::from_str("Options must be an object"))?;
+    
+    let verbose = js_sys::Reflect::get(&options_obj, &JsValue::from_str("verbose"))
+        .map(|v| v.as_bool().unwrap_or(false))
+        .unwrap_or(false);
+    
+    let batch_size = js_sys::Reflect::get(&options_obj, &JsValue::from_str("batchSize"))
+        .map(|v| v.as_f64().map(|n| n as usize).unwrap_or(4))
+        .unwrap_or(4);
+    
+    // Parse proofs array
+    let proofs_js_array: js_sys::Array = proofs_array.dyn_into()
+        .map_err(|_| JsValue::from_str("Proofs must be an array"))?;
+    
+    if proofs_js_array.length() == 0 {
+        return Err(JsValue::from_str("No proofs provided"));
+    }
+    
+    // Extract circuit type from the first proof
+    let first_proof_js = proofs_js_array.get(0);
+    let first_proof_obj: js_sys::Object = first_proof_js.dyn_into()
+        .map_err(|_| JsValue::from_str("Proof must be an object"))?;
+    
+    let circuit_type = js_sys::Reflect::get(&first_proof_obj, &JsValue::from_str("circuit_type"))
+        .map_err(|_| JsValue::from_str("Failed to get circuit_type from proof"))?
+        .as_string()
+        .ok_or_else(|| JsValue::from_str("circuit_type must be a string"))?;
+    
+    // Convert JS proofs to Rust proofs
+    let mut proofs = Vec::with_capacity(proofs_js_array.length() as usize);
+    
+    for i in 0..proofs_js_array.length() {
+        let proof_js = proofs_js_array.get(i);
+        let proof_obj: js_sys::Object = proof_js.dyn_into()
+            .map_err(|_| JsValue::from_str("Proof must be an object"))?;
+        
+        // Verify the proof structure
+        verify_proof_structure(&proof_obj)?;
+        
+        // Convert to SerializableProof
+        let serializable_proof: SerializableProof = serde_wasm_bindgen::from_value(proof_js)
+            .map_err(|e| JsValue::from_str(&format!("Failed to parse proof: {}", e)))?;
+        
+        // Create a dummy circuit to get common data
+        let circuit = create_dummy_circuit(&circuit_type)?;
+        
+        // Convert to ProofWithPublicInputs
+        let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
+            .map_err(|e| JsValue::from_str(&format!("Failed to convert proof: {}", e)))?;
+        
+        proofs.push(proof);
+        
+        if verbose {
+            console::log_1(&JsValue::from_str(&format!("Loaded proof {}/{}", i + 1, proofs_js_array.length())));
+        }
+    }
+    
+    console::log_1(&JsValue::from_str(&format!("Loaded {} proofs", proofs.len())));
+    
+    // Aggregate the proofs
+    let options = RecursiveProverOptions {
+        verbose,
+        max_proofs_per_step: Some(batch_size),
+    };
+    
+    console::log_1(&JsValue::from_str(&format!("Aggregating proofs with batch size: {}", batch_size)));
+    let result = aggregate_proofs(proofs, options)
+        .map_err(|e| JsValue::from_str(&format!("Failed to aggregate proofs: {}", e)))?;
+    
+    console::log_1(&JsValue::from_str(&format!("Successfully aggregated {} proofs", result.num_proofs)));
+    console::log_1(&JsValue::from_str(&format!("Aggregation time: {:?}", result.generation_time)));
+    
+    // Convert back to SerializableProof
+    let serializable = SerializableProof::from(result.proof);
+    
+    // Create result object
+    let js_result = js_sys::Object::new();
+    
+    // Add proof data
+    let proof_js = serde_wasm_bindgen::to_value(&serializable)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize proof: {}", e)))?;
+    
+    js_sys::Reflect::set(&js_result, &JsValue::from_str("proof"), &proof_js)
+        .map_err(|_| JsValue::from_str("Failed to set proof in result"))?;
+    
+    // Add metadata
+    js_sys::Reflect::set(&js_result, &JsValue::from_str("numProofs"), &JsValue::from_f64(result.num_proofs as f64))
+        .map_err(|_| JsValue::from_str("Failed to set numProofs in result"))?;
+    
+    js_sys::Reflect::set(&js_result, &JsValue::from_str("generationTime"), &JsValue::from_f64(result.generation_time.as_secs_f64()))
+        .map_err(|_| JsValue::from_str("Failed to set generationTime in result"))?;
+    
+    js_sys::Reflect::set(&js_result, &JsValue::from_str("circuit_type"), &JsValue::from_str(&circuit_type))
+        .map_err(|_| JsValue::from_str("Failed to set circuit_type in result"))?;
+    
+    Ok(js_result.into())
+}
+
+// Verify an aggregated proof
+#[wasm_bindgen]
+pub fn verify_aggregated_proof(
+    proof_js: JsValue,
+    circuit_type: String,
+) -> Result<JsValue, JsValue> {
+    console::log_1(&JsValue::from_str("Verifying aggregated proof..."));
+    
+    // Verify the proof structure
+    let proof_obj: js_sys::Object = proof_js.dyn_into()
+        .map_err(|_| JsValue::from_str("Proof must be an object"))?;
+    
+    verify_proof_structure(&proof_obj)?;
+    
+    // Convert to SerializableProof
+    let serializable_proof: SerializableProof = serde_wasm_bindgen::from_value(proof_js)
+        .map_err(|e| JsValue::from_str(&format!("Failed to parse proof: {}", e)))?;
+    
+    // Create a dummy circuit
+    let circuit = create_dummy_circuit(&circuit_type)?;
+    
+    // Convert to ProofWithPublicInputs
+    let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
+        .map_err(|e| JsValue::from_str(&format!("Failed to convert proof: {}", e)))?;
+    
+    // Verify the aggregated proof
+    let start = js_sys::Date::now();
+    let verified_count = verify_aggregated_proof(&proof, &circuit)
+        .map_err(|e| JsValue::from_str(&format!("Failed to verify aggregated proof: {}", e)))?;
+    let verification_time = (js_sys::Date::now() - start) / 1000.0;
+    
+    console::log_1(&JsValue::from_str("Verification successful!"));
+    console::log_1(&JsValue::from_str(&format!("Verified {} proofs in {:.2}s", verified_count, verification_time)));
+    console::log_1(&JsValue::from_str(&format!("Verification throughput: {:.2} proofs/second", 
+        verified_count as f64 / verification_time)));
+    
+    // Create result object
+    let result = js_sys::Object::new();
+    
+    js_sys::Reflect::set(&result, &JsValue::from_str("valid"), &JsValue::from_bool(true))
+        .map_err(|_| JsValue::from_str("Failed to set valid in result"))?;
+    
+    js_sys::Reflect::set(&result, &JsValue::from_str("numProofs"), &JsValue::from_f64(verified_count as f64))
+        .map_err(|_| JsValue::from_str("Failed to set numProofs in result"))?;
+    
+    js_sys::Reflect::set(&result, &JsValue::from_str("verificationTime"), &JsValue::from_f64(verification_time))
+        .map_err(|_| JsValue::from_str("Failed to set verificationTime in result"))?;
+    
+    Ok(result.into())
+}
+
+// Create a dummy circuit for proof conversion and verification
+fn create_dummy_circuit(circuit_type: &str) -> Result<plonky2::plonk::circuit_data::CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2>, JsValue> {
+    use plonky2::plonk::circuit_builder::CircuitBuilder;
+    use plonky2::plonk::circuit_data::CircuitConfig;
+    
+    let config = CircuitConfig::standard_recursion_config();
+    let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+    
+    // Add a dummy target
+    let target = builder.add_virtual_target();
+    builder.register_public_input(target);
+    
+    // Build the circuit
+    let circuit = builder.build::<PoseidonGoldilocksConfig>();
+    
+    Ok(circuit)
 }
