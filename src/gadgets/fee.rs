@@ -5,9 +5,9 @@ use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::{PublicKeyTarget, UTXOTarget};
-use crate::gadgets::comparison::is_less_than_or_equal;
-use crate::gadgets::hash_for_signature;
-use crate::gadgets::hash_utxo_target;
+use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
+use crate::utils::hash::{compute_message_hash_targets as hash_for_signature};
+use crate::utils::nullifier::{compute_utxo_hash_target as hash_utxo_target};
 
 /// Enforce fee payment for a transaction
 ///
@@ -161,6 +161,63 @@ pub fn validate_fee_amount<F: RichField + Extendable<D>, const D: usize>(
     
     // Return the validated fee amount
     fee_amount
+}
+
+/// Calculate the fee for a transaction
+///
+/// This function calculates the fee for a transaction based on:
+/// 1. The base fee
+/// 2. The transaction size
+/// 3. The current network congestion
+///
+/// Returns the calculated fee amount
+pub fn calculate_fee<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    base_fee: Target,
+    tx_size: Target,
+    congestion_factor: Target,
+) -> Target {
+    // Calculate the size component: tx_size * size_multiplier
+    let size_multiplier = builder.constant(F::from_canonical_u64(10)); // 10 satoshis per byte
+    let size_component = builder.mul(tx_size, size_multiplier);
+    
+    // Calculate the congestion component: base_fee * congestion_factor
+    let congestion_component = builder.mul(base_fee, congestion_factor);
+    
+    // Total fee = base_fee + size_component + congestion_component
+    let temp_sum = builder.add(base_fee, size_component);
+    builder.add(temp_sum, congestion_component)
+}
+
+/// Verify that a fee payment is valid
+///
+/// This function verifies that:
+/// 1. The fee amount is at least the minimum required fee
+/// 2. The fee is paid in the correct asset type
+/// 3. The fee is sent to the correct reservoir address
+///
+/// Returns a boolean target indicating whether the fee payment is valid
+pub fn verify_fee_payment<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    fee_amount: Target,
+    min_required_fee: Target,
+    fee_asset_id: Target,
+    expected_asset_id: Target,
+    fee_recipient: Target,
+    expected_recipient: Target,
+) -> Target {
+    // Check that fee_amount >= min_required_fee
+    let fee_sufficient = is_less_than_or_equal(builder, min_required_fee, fee_amount);
+    
+    // Check that fee_asset_id == expected_asset_id
+    let correct_asset = builder.is_equal(fee_asset_id, expected_asset_id);
+    
+    // Check that fee_recipient == expected_recipient
+    let correct_recipient = builder.is_equal(fee_recipient, expected_recipient);
+    
+    // All conditions must be true
+    let asset_and_recipient = builder.and(correct_asset, correct_recipient);
+    builder.and(fee_sufficient, asset_and_recipient).target
 }
 
 #[cfg(test)]

@@ -1,7 +1,9 @@
 // Validation module for the WASM interface
 // Provides security-focused input validation for all WASM functions
 
+#[cfg(feature = "wasm")]
 use wasm_bindgen::prelude::*;
+#[cfg(feature = "wasm")]
 use js_sys::{Array, Object, Uint8Array};
 use serde_json::Value;
 use std::collections::HashSet;
@@ -19,6 +21,7 @@ pub enum ValidationError {
 }
 
 impl ValidationError {
+    #[cfg(feature = "wasm")]
     pub fn to_js_error(&self) -> JsValue {
         let error_msg = match self {
             ValidationError::MissingField(field) => format!("Missing required field: {}", field),
@@ -208,7 +211,7 @@ pub fn validate_string(value: &Value, field_name: &str) -> Result<String, Valida
 }
 
 /// Validate an array value
-pub fn validate_array(value: &Value, field_name: &str) -> Result<&Vec<Value>, ValidationError> {
+pub fn validate_array<'a>(value: &'a Value, field_name: &str) -> Result<&'a Vec<Value>, ValidationError> {
     match value {
         Value::Array(a) => Ok(a),
         _ => Err(ValidationError::InvalidType(format!(
@@ -218,7 +221,7 @@ pub fn validate_array(value: &Value, field_name: &str) -> Result<&Vec<Value>, Va
 }
 
 /// Validate an object value
-pub fn validate_object(value: &Value, field_name: &str) -> Result<&serde_json::Map<String, Value>, ValidationError> {
+pub fn validate_object<'a>(value: &'a Value, field_name: &str) -> Result<&'a serde_json::Map<String, Value>, ValidationError> {
     match value {
         Value::Object(o) => Ok(o),
         _ => Err(ValidationError::InvalidType(format!(
@@ -252,6 +255,7 @@ pub fn validate_proof_structure(proof: &Value) -> Result<(), ValidationError> {
     Ok(())
 }
 
+#[cfg(feature = "wasm")]
 /// Validate a JS array of proofs
 pub fn validate_proofs_array(proofs_array: &JsValue) -> Result<Vec<Value>, ValidationError> {
     // Convert JS array to Rust array
@@ -289,6 +293,7 @@ pub fn validate_proofs_array(proofs_array: &JsValue) -> Result<Vec<Value>, Valid
     Ok(proofs)
 }
 
+#[cfg(feature = "wasm")]
 /// Validate options for proof aggregation
 pub fn validate_aggregation_options(options_js: &JsValue) -> Result<(usize, bool), ValidationError> {
     // Default values

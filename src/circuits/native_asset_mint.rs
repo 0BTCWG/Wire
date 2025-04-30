@@ -9,7 +9,9 @@ use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::field::goldilocks_field::GoldilocksField;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
-use crate::gadgets::{verify_message_signature, enforce_fee_payment, hash_targets};
+use crate::gadgets::verify_message_signature;
+use crate::gadgets::fee::enforce_fee_payment;
+use crate::utils::hash::compute_hash_targets as hash_targets;
 
 /// Circuit for minting native asset tokens
 ///
@@ -193,7 +195,7 @@ impl NativeAssetMintCircuit {
         use crate::core::proof::{serialize_proof, ProofError};
         
         // Create the circuit
-        let circuit_data = Self::create_circuit();
+        let _circuit_data = Self::create_circuit();
         let mut pw = PartialWitness::new();
         
         // Create a new circuit builder for virtual targets

@@ -38,7 +38,6 @@
 - ✅ Implemented NativeAssetCreateCircuit (structure)
 - ✅ Implemented NativeAssetMintCircuit (structure)
 - ✅ Implemented NativeAssetBurnCircuit (structure)
-- ✅ Updated all circuit files to be compatible with Plonky2 v1.0.2
 
 ### CLI
 - ✅ Set up basic CLI structure with clap
@@ -166,6 +165,11 @@
 - ✅ Project is ready for external audit
 
 ## In Progress
+
+### Plonky2 Compatibility
+- 🔄 Updating all circuits for Plonky2 v1.0.2 compatibility
+- 🔄 Fixing compilation issues with utility modules
+- 🔄 Ensuring cross-platform compatibility
 
 ## Known Issues
 

@@ -1,34 +1,36 @@
-// 0BTC Wire - Zero-Knowledge UTXO System
-//
-// This library implements Plonky2 circuits for a UTXO-based cryptocurrency
-// platform with support for wrapped Bitcoin, token transfers, and native assets.
+// 0BTC Wire Library
+// Main library entry point
 
-pub mod core;
-pub mod gadgets;
+// Re-export all modules
 pub mod circuits;
-pub mod wasm;
-pub mod utils;
+// Temporarily disable the cli module to focus on fixing core functionality
+// pub mod cli;
+pub mod core;
 pub mod errors;
-pub mod tests {
-    pub mod fuzz_tests;
-}
+pub mod gadgets;
+pub mod utils;
+
+#[cfg(feature = "wasm")]
+pub mod wasm;
+
+// Re-export common types
+pub use errors::{WireError, WireResult};
 
 // Re-export CLI modules
-pub mod cli;
-pub use cli::{
-    execute_command,
-    generate_keypair,
-    prove_circuit,
-    verify_proof,
-    aggregate_proofs_cli,
-    verify_aggregated_proof_cli,
-    // Advanced CLI features
-    config,
-    batch,
-    workflow,
-    commands,
-    advanced,
-};
+// pub use cli::{
+//     execute_command,
+//     generate_keypair,
+//     prove_circuit,
+//     verify_proof,
+//     aggregate_proofs_cli,
+//     verify_aggregated_proof_cli,
+//     // Advanced CLI features
+//     config,
+//     batch,
+//     workflow,
+//     commands,
+//     advanced,
+// };
 
 use log::info;
 

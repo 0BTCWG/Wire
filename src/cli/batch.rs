@@ -5,6 +5,10 @@ use std::time::Instant;
 use rayon::prelude::*;
 use log::{debug, info, warn};
 
+use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use plonky2::plonk::proof::ProofWithPublicInputs;
+
 use crate::cli::config::BatchConfig;
 use crate::errors::{IOError, ValidationError, WireError, WireResult};
 use crate::utils::recursive_prover::{aggregate_proofs, RecursiveProverOptions};
@@ -256,7 +260,7 @@ where
 }
 
 /// Load proofs from files
-fn load_proofs_from_files(files: &[PathBuf], circuit_type: &str) -> WireResult<Vec<plonky2::plonk::proof::ProofWithPublicInputs<plonky2::field::goldilocks_field::GoldilocksField, plonky2::hash::poseidon::PoseidonGoldilocksConfig, 2>>> {
+fn load_proofs_from_files(files: &[PathBuf], circuit_type: &str) -> WireResult<Vec<ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>>> {
     let mut proofs = Vec::new();
     
     for file in files {
@@ -268,7 +272,7 @@ fn load_proofs_from_files(files: &[PathBuf], circuit_type: &str) -> WireResult<V
 }
 
 /// Load a proof from a file
-fn load_proof_from_file(file: &Path, circuit_type: &str) -> WireResult<plonky2::plonk::proof::ProofWithPublicInputs<plonky2::field::goldilocks_field::GoldilocksField, plonky2::hash::poseidon::PoseidonGoldilocksConfig, 2>> {
+fn load_proof_from_file(file: &Path, circuit_type: &str) -> WireResult<ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>> {
     // This is a placeholder for the actual implementation
     // In a real implementation, this would deserialize the proof from the file
     // and convert it to the appropriate type based on the circuit type
@@ -279,7 +283,7 @@ fn load_proof_from_file(file: &Path, circuit_type: &str) -> WireResult<plonky2::
 }
 
 /// Save a proof to a file
-fn save_proof_to_file(proof: &plonky2::plonk::proof::ProofWithPublicInputs<plonky2::field::goldilocks_field::GoldilocksField, plonky2::hash::poseidon::PoseidonGoldilocksConfig, 2>, output_path: &Path) -> WireResult<()> {
+fn save_proof_to_file(proof: &ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>, output_path: &Path) -> WireResult<()> {
     // This is a placeholder for the actual implementation
     // In a real implementation, this would serialize the proof to JSON
     // and write it to the output file

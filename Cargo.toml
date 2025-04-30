@@ -73,6 +73,7 @@ path = "benchmark/src/main.rs"
 
 [features]
 default = []
+# The wasm feature is defined but not enabled by default
 wasm = ["wasm-bindgen", "js-sys", "web-sys", "console_error_panic_hook", "serde-wasm-bindgen"]
 audit-tests = ["rand/std_rng"]
 

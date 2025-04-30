@@ -195,10 +195,17 @@
 
 ## Current Tasks
 
-### Phase 19: Formal Verification Exploration
-- [ ] Research formal verification tools compatible with Plonky2
-- [ ] Identify critical components for formal verification
-- [ ] Create proof-of-concept formal verification for key gadgets
+### Plonky2 Compatibility Update
+- 🔄 Fix compilation issues with utility modules (field.rs, hash.rs, signature.rs, merkle.rs, nullifier.rs)
+- 🔄 Update circuit implementations to work with Plonky2 v1.0.2
+- 🔄 Ensure cross-platform compatibility (Linux, macOS, Windows)
+- 🔄 Verify all tests pass with the updated implementation
+
+### Formal Verification Exploration
+- ⬜ Research formal verification approaches for zero-knowledge circuits
+- ⬜ Identify key security properties for formal verification
+- ⬜ Develop a proof-of-concept formal verification for a simple circuit
+- ⬜ Document findings and recommendations for full implementation
 
 ## Next Steps
 

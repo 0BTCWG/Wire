@@ -60,6 +60,106 @@ pub fn sum<F: RichField + Extendable<D>, const D: usize>(
     result
 }
 
+/// Add two targets
+pub fn add<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    builder.add(a, b)
+}
+
+/// Subtract one target from another
+pub fn sub<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    builder.sub(a, b)
+}
+
+/// Multiply two targets
+pub fn mul<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    builder.mul(a, b)
+}
+
+/// Divide one target by another
+pub fn div<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    // Compute 1/b
+    let b_inv = builder.inverse(b);
+    
+    // Compute a * (1/b)
+    builder.mul(a, b_inv)
+}
+
+/// Check if a is equal to b (alias for is_equal)
+pub fn eq<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    is_equal(builder, a, b)
+}
+
+/// Check if a is less than b
+pub fn lt<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    // Compute b - a
+    let diff = builder.sub(b, a);
+    
+    // Check if diff > 0
+    let zero = builder.zero();
+    let is_positive = builder.is_equal(zero, diff);
+    let result = builder.not(is_positive);
+    
+    result.target
+}
+
+/// Check if a is less than or equal to b
+pub fn lte<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    // a <= b is equivalent to !(a > b)
+    let a_gt_b = gt(builder, a, b);
+    let not_a_gt_b = builder.not(a_gt_b);
+    not_a_gt_b.target
+}
+
+/// Check if a is greater than b
+pub fn gt<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    // a > b is equivalent to b < a
+    lt(builder, b, a)
+}
+
+/// Check if a is greater than or equal to b
+pub fn gte<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    a: Target,
+    b: Target,
+) -> Target {
+    // a >= b is equivalent to !(a < b)
+    let a_lt_b = lt(builder, a, b);
+    let not_a_lt_b = builder.not(a_lt_b);
+    not_a_lt_b.target
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

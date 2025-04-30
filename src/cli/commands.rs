@@ -116,10 +116,10 @@ pub fn execute_prove_command(
     };
     
     // Get circuit configuration
-    let circuit_config = config.get_circuit_config(circuit_type)?;
+    let _circuit_config = config.get_circuit_config(circuit_type)?;
     
     // Apply optimization level
-    let optimization_level = circuit_config.optimization_level;
+    let optimization_level = _circuit_config.optimization_level;
     debug!("Using optimization level: {}", optimization_level);
     
     // Start timing
@@ -157,7 +157,7 @@ pub fn execute_verify_command(
     };
     
     // Get circuit configuration
-    let circuit_config = config.get_circuit_config(circuit_type)?;
+    let _circuit_config = config.get_circuit_config(circuit_type)?;
     
     // Start timing
     let start_time = Instant::now();

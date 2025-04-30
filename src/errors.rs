@@ -65,6 +65,12 @@ impl From<&str> for WireError {
     }
 }
 
+impl From<CryptoError> for WireError {
+    fn from(error: CryptoError) -> Self {
+        WireError::CryptoError(error)
+    }
+}
+
 /// Cryptographic error types
 #[derive(Debug)]
 pub enum CryptoError {

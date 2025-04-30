@@ -237,7 +237,23 @@ pub fn benchmark_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F
         // Verify proofs
         let verify_start = Instant::now();
         
-        if config.use_recursive && proofs.len() > 1 {
+        if config.use_parallel && proofs.len() > 1 {
+            // Convert proofs to a Vec of references
+            let proof_refs: Vec<&ProofWithPublicInputs<F, C, D>> = proofs.iter().collect();
+            
+            // Convert circuit to a Vec of references
+            let circuit_refs = vec![&circuit];
+            
+            // Verify proofs in parallel
+            let results = verify_proofs_in_parallel(circuit_refs, proof_refs, config.thread_count);
+            
+            // Check all results
+            for result in results {
+                if let Err(e) = result {
+                    panic!("Failed to verify proof in parallel: {}", e);
+                }
+            }
+        } else if config.use_recursive && proofs.len() > 1 {
             // Aggregate proofs
             let recursive_options = RecursiveProverOptions {
                 verbose: config.verbose,
@@ -257,19 +273,10 @@ pub fn benchmark_circuit<F: RichField + Extendable<D>, C: GenericConfig<D, F = F
                 result.add_metric("aggregation_throughput", 
                     aggregation_result.num_proofs as f64 / aggregation_result.generation_time.as_secs_f64());
             }
-        } else if config.use_parallel && proofs.len() > 1 {
-            // Verify proofs in parallel
-            let parallel_options = ParallelProverOptions {
-                num_threads: config.thread_count,
-                verbose: config.verbose,
-            };
-            
-            verify_proofs_in_parallel(circuit, &proofs, parallel_options)
-                .expect("Failed to verify proofs in parallel");
         } else {
             // Verify proofs sequentially
             for proof in &proofs {
-                circuit.verify(proof).expect("Failed to verify proof");
+                circuit.verify(proof.clone()).expect("Failed to verify proof");
             }
         }
         
@@ -314,7 +321,7 @@ pub fn benchmark_circuit_builder<F: RichField + Extendable<D>, C: GenericConfig<
     
     // Build the circuit and measure creation time
     let circuit_start = Instant::now();
-    let (mut builder, witnesses) = build_circuit();
+    let (builder, witnesses) = build_circuit();
     let circuit_data = builder.build::<C>();
     let circuit_creation_time = circuit_start.elapsed();
     

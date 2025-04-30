@@ -11,8 +11,10 @@ use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
-use crate::gadgets::comparison::is_less_than_or_equal;
-use crate::gadgets::{enforce_fee_payment, hash_utxo_commitment, verify_message_signature};
+use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
+use crate::gadgets::fee::enforce_fee_payment;
+use crate::utils::nullifier::compute_utxo_hash as hash_utxo_commitment;
+use crate::gadgets::verify_message_signature;
 
 /// Circuit for burning native asset tokens
 ///

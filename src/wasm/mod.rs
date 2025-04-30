@@ -34,7 +34,7 @@ use validation::{
     validate_asset_id,
     validate_circuit_type,
     validate_batch_size,
-    validate_proof_structure,
+    validate_proof_structure as validate_proof_json_structure,
     validate_proofs_array,
     validate_aggregation_options,
     validate_wrapped_asset_mint_params,
@@ -736,7 +736,7 @@ pub fn verify_proof(
             
             // In a real implementation, we would use the circuit_data to verify the proof
             // For now, we'll just check that the proof structure is valid
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         "WrappedAssetBurn" => {
             console::log_1(&JsValue::from_str("Verifying WrappedAssetBurn proof"));
@@ -745,7 +745,7 @@ pub fn verify_proof(
             let _circuit_data = WrappedAssetBurnCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         "Transfer" => {
             console::log_1(&JsValue::from_str("Verifying Transfer proof"));
@@ -754,7 +754,7 @@ pub fn verify_proof(
             let _circuit_data = TransferCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         "NativeAssetCreate" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetCreate proof"));
@@ -763,7 +763,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetCreateCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         "NativeAssetMint" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetMint proof"));
@@ -772,7 +772,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetMintCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         "NativeAssetBurn" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetBurn proof"));
@@ -781,7 +781,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetBurnCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            validate_proof_structure(&proof_data)?
+            validate_proof_json_structure(&proof_data)?
         },
         _ => {
             return Err(JsValue::from_str(&format!("Unknown circuit type: {}", circuit_type)));
@@ -982,7 +982,7 @@ pub fn verify_aggregated_proof(
     };
     
     // Validate the proof structure
-    match validate_proof_structure(&proof_value) {
+    match validate_proof_json_structure(&proof_value) {
         Ok(_) => {},
         Err(e) => return Err(e.to_js_error()),
     }

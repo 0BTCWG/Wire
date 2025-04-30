@@ -1,15 +1,14 @@
 // Wrapped Asset Burn Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
-use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData, CommonCircuitData};
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
-use plonky2::recursion::dummy_circuit::DummyCircuitData;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
@@ -136,7 +135,7 @@ impl WrappedAssetBurnCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a sender secret key
-        let sender_sk = builder.add_virtual_target();
+        let _sender_sk_target = builder.add_virtual_target();
         
         // Create a sender public key
         let sender_pk = PublicKeyTarget {
@@ -174,7 +173,7 @@ impl WrappedAssetBurnCircuit {
         };
         
         // Build the circuit
-        circuit.build(&mut builder, sender_sk);
+        circuit.build(&mut builder, builder.zero());
         
         // Build the circuit data
         builder.build()
@@ -391,7 +390,7 @@ impl WrappedAssetBurnCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a sender secret key
-        let sender_sk_target = builder.add_virtual_target();
+        let _sender_sk_target = builder.add_virtual_target();
         
         // Create a sender public key
         let sender_pk_target = PublicKeyTarget {

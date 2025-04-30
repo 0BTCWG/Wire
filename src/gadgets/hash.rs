@@ -497,19 +497,19 @@ pub fn count_utxo_hash_gates<F: RichField + Extendable<D>, const D: usize>(
     
     // Create dummy UTXO components
     let mut owner_pubkey_hash = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         owner_pubkey_hash.push(builder.add_virtual_target());
     }
     
     let mut asset_id = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         asset_id.push(builder.add_virtual_target());
     }
     
     let amount = builder.add_virtual_target();
     
     let mut salt = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         salt.push(builder.add_virtual_target());
     }
     
@@ -544,19 +544,19 @@ pub fn count_optimized_utxo_hash_gates<F: RichField + Extendable<D>, const D: us
     
     // Create a dummy UTXO
     let mut owner_pubkey_hash = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         owner_pubkey_hash.push(builder.add_virtual_target());
     }
     
     let mut asset_id = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         asset_id.push(builder.add_virtual_target());
     }
     
     let amount = builder.add_virtual_target();
     
     let mut salt = Vec::with_capacity(4);
-    for i in 0..4 {
+    for _i in 0..4 {
         salt.push(builder.add_virtual_target());
     }
     
@@ -664,20 +664,20 @@ mod tests {
         
         // Create a valid UTXO
         let mut owner_pubkey_hash = Vec::with_capacity(4);
-        for i in 0..4 {
-            owner_pubkey_hash.push(builder.constant(F::from_canonical_u64(i as u64)));
+        for _i in 0..4 {
+            owner_pubkey_hash.push(builder.constant(F::from_canonical_u64(123)));
         }
         
         let mut asset_id = Vec::with_capacity(4);
-        for i in 0..4 {
-            asset_id.push(builder.constant(F::from_canonical_u64((i + 10) as u64)));
+        for _i in 0..4 {
+            asset_id.push(builder.constant(F::from_canonical_u64(456)));
         }
         
-        let amount = builder.constant(F::from_canonical_u64(1000));
+        let amount = builder.constant(F::from_canonical_u64(789));
         
         let mut salt = Vec::with_capacity(4);
-        for i in 0..4 {
-            salt.push(builder.constant(F::from_canonical_u64((i + 20) as u64)));
+        for _i in 0..4 {
+            salt.push(builder.constant(F::from_canonical_u64(1011)));
         }
         
         // Create a UTXOTarget

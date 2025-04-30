@@ -1,21 +1,22 @@
 // Transfer Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::{Field, PrimeField64};
+use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData, CommonCircuitData};
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
-use plonky2::recursion::dummy_circuit::DummyCircuitData;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
 
 use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
 use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
-use crate::gadgets::comparison::is_less_than_or_equal;
-use crate::gadgets::{calculate_and_register_nullifier, enforce_fee_payment, sum, verify_message_signature};
+use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
+use crate::gadgets::{calculate_and_register_nullifier, verify_message_signature};
+use crate::gadgets::arithmetic::sum;
+use crate::gadgets::fee::enforce_fee_payment;
 use crate::errors::{WireError, WireResult};
 
 /// Circuit for transferring assets between UTXOs

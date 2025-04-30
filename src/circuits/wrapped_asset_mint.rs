@@ -5,11 +5,10 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData, CommonCircuitData};
 use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::recursion::dummy_circuit::DummyCircuitData;
 use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};

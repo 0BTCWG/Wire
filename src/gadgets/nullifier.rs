@@ -4,7 +4,7 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::gadgets::hash_for_nullifier;
+use crate::utils::hash::{compute_nullifier_targets as hash_for_nullifier};
 use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Calculate a nullifier for a UTXO with domain separation

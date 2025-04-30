@@ -5,8 +5,9 @@ use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget};
-use crate::gadgets::{hash_targets, is_equal};
-use crate::gadgets::ed25519::{is_on_curve, optimized_scalar_multiply, point_add, get_base_point};
+use crate::utils::hash::{compute_hash_targets as hash_targets};
+use crate::gadgets::arithmetic::is_equal;
+use crate::utils::signature::{is_on_curve, optimized_scalar_multiply_targets as point_add, scalar_multiply as get_base_point};
 use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Verify an EdDSA signature
@@ -40,7 +41,7 @@ pub fn verify_message_signature<F: RichField + Extendable<D>, const D: usize>(
     assert_is_on_curve(builder, &signature.r_point);
     
     // 3. Compute the message hash using domain separation for signatures
-    let message_hash = crate::gadgets::hash::hash_for_signature(builder, message)?;
+    let message_hash = crate::utils::hash::hash_for_signature(builder, message)?;
     
     // 4. Compute h = H(R, A, M)
     let mut hash_inputs = Vec::new();
@@ -50,7 +51,7 @@ pub fn verify_message_signature<F: RichField + Extendable<D>, const D: usize>(
     hash_inputs.push(public_key.point.y);
     hash_inputs.push(message_hash);
     
-    let h = crate::gadgets::hash::hash_for_signature(builder, &hash_inputs)?;
+    let h = crate::utils::hash::hash_for_signature(builder, &hash_inputs)?;
     
     // 5. Compute S * B, where B is the base point
     let s_b = scalar_mul_base_point(builder, signature.s_scalar);
@@ -139,7 +140,7 @@ pub fn batch_verify_signatures<F: RichField + Extendable<D>, const D: usize>(
         }
         
         // Compute the message hash
-        let message_hash = crate::gadgets::hash::hash_for_signature(builder, &messages[i])?;
+        let message_hash = crate::utils::hash::hash_for_signature(builder, &messages[i])?;
         messages_hash.push(message_hash);
     }
     
@@ -156,7 +157,7 @@ pub fn batch_verify_signatures<F: RichField + Extendable<D>, const D: usize>(
         seed_inputs.push(public_keys[i].point.x);
         
         // Hash the seed to get a pseudorandom weight
-        let weight = crate::gadgets::hash::hash(builder, &seed_inputs)?;
+        let weight = crate::utils::hash::hash(builder, &seed_inputs)?;
         weights.push(weight);
     }
     
@@ -214,7 +215,7 @@ pub fn batch_verify_signatures<F: RichField + Extendable<D>, const D: usize>(
         hash_inputs.push(public_keys[i].point.y);
         hash_inputs.push(messages_hash[i]);
         
-        let h = crate::gadgets::hash::hash_for_signature(builder, &hash_inputs)?;
+        let h = crate::utils::hash::hash_for_signature(builder, &hash_inputs)?;
         
         // Compute weighted_h = weight_i * h
         let weighted_h = builder.mul(weights[i], h);
@@ -248,30 +249,53 @@ pub fn batch_verify_signatures<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Helper function to assert that a point is on the curve
-fn assert_is_on_curve<F: RichField + Extendable<D>, const D: usize>(
+pub fn assert_is_on_curve<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     point: &PointTarget,
 ) {
-    let is_valid = is_on_curve(builder, point);
-    builder.assert_one(is_valid);
+    is_on_curve(builder, point.x, point.y);
 }
 
 /// Helper function to perform scalar multiplication with the base point
-fn scalar_mul_base_point<F: RichField + Extendable<D>, const D: usize>(
+pub fn scalar_mul_base_point<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     scalar: Target,
 ) -> PointTarget {
-    let base_point = get_base_point(builder);
-    optimized_scalar_multiply(builder, scalar, &base_point)
+    // Get the base point
+    let base_point = get_base_point::<F>();
+    let base_x = builder.constant(base_point.0);
+    let base_y = builder.constant(base_point.1);
+    
+    // Use optimized scalar multiplication
+    let (result_x, result_y) = crate::utils::signature::optimized_scalar_multiply_targets(
+        builder,
+        (base_x, base_y),
+        scalar
+    );
+    
+    PointTarget {
+        x: result_x,
+        y: result_y,
+    }
 }
 
 /// Helper function to perform scalar multiplication
-fn scalar_mul<F: RichField + Extendable<D>, const D: usize>(
+pub fn scalar_mul<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     scalar: Target,
     point: &PointTarget,
 ) -> PointTarget {
-    optimized_scalar_multiply(builder, scalar, point)
+    // Use optimized scalar multiplication
+    let (result_x, result_y) = crate::utils::signature::optimized_scalar_multiply_targets(
+        builder,
+        (point.x, point.y),
+        scalar
+    );
+    
+    PointTarget {
+        x: result_x,
+        y: result_y,
+    }
 }
 
 /// Count the number of gates used in signature verification

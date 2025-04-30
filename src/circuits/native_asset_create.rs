@@ -9,7 +9,9 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
-use crate::gadgets::{calculate_asset_id, enforce_fee_payment, verify_message_signature};
+use crate::utils::hash::compute_asset_id as calculate_asset_id;
+use crate::gadgets::fee::enforce_fee_payment;
+use crate::gadgets::verify_message_signature;
 
 /// Circuit for creating a new native asset
 ///
