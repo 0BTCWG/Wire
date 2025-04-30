@@ -339,55 +339,115 @@ The 0BTC Wire project should provide the following security properties:
    - Complete input validation for all WASM functions
    - Sanitize error messages to prevent information leakage
 
-### Summary of Key Findings
+#### Merkle Proof Verification
 
-1. **Signature Verification**:
-   - The EdDSA signature verification implementation is generally correct but needs stronger constraint enforcement
-   - Batch verification needs more secure randomness for weights
-   - Signed messages should include all relevant parameters
+1. **Implementation Correctness**:
+   - The Merkle proof verification implementation correctly computes the path from leaf to root
+   - The implementation uses an optimized approach with select operations instead of conditional logic
+   - The implementation properly checks if the computed root matches the expected root
 
-2. **Hash Functions**:
-   - Multiple hash implementations could lead to inconsistencies
-   - Empty input handling needs improvement
-   - Domain separation should be added for different hash usages
+2. **Security Considerations**:
+   - The verification returns a Target (0 or 1) rather than asserting the root equality
+   - There's no validation of the tree height or proof structure
+   - The implementation doesn't handle edge cases like empty trees
 
-3. **Nullifier Generation**:
-   - The nullifier calculation uses the owner's secret key directly, which could leak information
-   - Domain separation should be added
-   - Consider adding randomness for improved privacy
+3. **Recommendations**:
+   - Modify the verification to use `builder.assert_is_equal` to enforce the root equality
+   - Add validation of the tree height and proof structure
+   - Add explicit handling of edge cases
 
-4. **Circuit Implementations**:
-   - Conservation of value is properly enforced
-   - Nonce handling needs improvement
-   - Asset ID verification should be more explicit
+#### Fee Payment Gadget
 
-5. **Recursive Proof Aggregation**:
-   - The implementation is sound but needs more robust public input handling
-   - Proof compatibility validation should be added
-   - Condition enforcement should be more explicit
+1. **Implementation Correctness**:
+   - The gadget correctly verifies ownership of the input UTXO
+   - The gadget checks if the input UTXO has enough funds
+   - The gadget calculates the change amount correctly
 
-6. **Input Validation**:
-   - CLI and WASM interfaces have basic validation but need enhancement
-   - Path sanitization and structured error handling should be added
-   - Random number generation in browser contexts needs review
+2. **Security Considerations**:
+   - The gadget doesn't verify that the input UTXO is of the correct asset type (wBTC)
+   - The reservoir address hash is passed as a parameter but not used
+   - The message signed by the fee payer doesn't include the fee amount or recipient
 
-### Next Steps
+3. **Recommendations**:
+   - Add verification that the input UTXO is of the correct asset type
+   - Use the reservoir address hash to create the fee UTXO
+   - Include the fee amount and recipient in the signed message
 
-1. **Implement High-Priority Fixes**:
-   - Add domain separation to hash functions
-   - Enhance constraint enforcement in signature verification
-   - Improve nonce handling and validation
-   - Add explicit asset ID verification
+#### Comparison Gadget
 
-2. **Enhance Input Validation**:
-   - Implement comprehensive validation for all interfaces
+1. **Implementation Correctness**:
+   - The implementation correctly checks if a value is less than, less than or equal to, greater than, or greater than or equal to another value
+   - The implementation uses efficient operations to minimize constraint count
+   - The implementation is well-tested with various test cases
+
+2. **Security Considerations**:
+   - The implementation assumes field elements are being compared as integers
+   - The implementation doesn't handle edge cases like field overflow
+   - The implementation doesn't provide a way to compare multi-limb integers
+
+3. **Recommendations**:
+   - Document the assumptions about field element comparisons
+   - Add handling for field overflow cases
+   - Consider adding support for multi-limb integer comparisons
+
+### Security Audit Task List
+
+Based on the comprehensive security audit, here is a prioritized list of fixes needed:
+
+#### High Priority (Critical Security Issues)
+
+1. **Add Domain Separation to Hash Functions**
+   - Modify hash functions to include a domain separator for different usages
+   - Update empty input handling to use a secure approach
+
+2. **Enforce Constraints in Signature Verification**
+   - Modify `is_on_curve` to use assertions rather than returning a target
+   - Add explicit input validation for signature components
+
+3. **Improve Nullifier Generation**
+   - Add domain separation to nullifier generation
+   - Consider using a derived key instead of the owner's secret key directly
+
+4. **Enhance Merkle Proof Verification**
+   - Modify verification to use assertions rather than returning a target
+   - Add validation of tree height and proof structure
+
+#### Medium Priority (Important Security Improvements)
+
+5. **Improve Fee Payment Gadget**
+   - Add verification of asset type
+   - Use the reservoir address hash properly
+   - Include fee details in signed messages
+
+6. **Enhance Nonce Handling**
+   - Add explicit randomness requirements for nonces
+   - Implement a mechanism to track and validate used nonces
+
+7. **Strengthen Recursive Proof Aggregation**
+   - Add explicit enforcement of verification conditions
+   - Implement more robust public input handling
+   - Add validation of proof compatibility
+
+8. **Improve Input Validation**
+   - Add comprehensive validation in CLI and WASM interfaces
    - Add path sanitization for file operations
    - Implement structured error handling
 
-3. **Improve Security Documentation**:
-   - Document security assumptions and properties
-   - Create a security model for the system
-   - Provide guidelines for secure usage
+#### Low Priority (Security Enhancements)
+
+9. **Enhance Comparison Gadget**
+   - Document assumptions about field element comparisons
+   - Add handling for field overflow cases
+   - Consider adding support for multi-limb integer comparisons
+
+10. **Improve Error Handling**
+    - Sanitize error messages to prevent information leakage
+    - Implement structured error types for better error handling
+
+11. **Enhance Security Documentation**
+    - Document security assumptions and properties
+    - Create a security model for the system
+    - Provide guidelines for secure usage
 
 ## References
 
