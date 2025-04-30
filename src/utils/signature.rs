@@ -169,7 +169,7 @@ pub fn verify_signature_in_circuit<F: RichField + Extendable<D>, const D: usize>
 }
 
 /// Computes a message hash for signature verification
-pub fn compute_message_hash<F: Field>(message_parts: &[F]) -> F {
+pub fn compute_message_hash<F: RichField>(message_parts: &[F]) -> F {
     // Import the function from the hash module
     crate::utils::hash::compute_message_hash(message_parts)
 }
@@ -184,7 +184,7 @@ pub fn compute_message_hash_targets<F: RichField + Extendable<D>, const D: usize
 }
 
 /// Computes a public key hash
-pub fn compute_public_key_hash<F: Field>(public_key: (F, F)) -> F {
+pub fn compute_public_key_hash<F: RichField>(public_key: (F, F)) -> F {
     compute_message_hash(&[public_key.0, public_key.1])
 }
 

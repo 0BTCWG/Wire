@@ -12,8 +12,8 @@ use plonky2::plonk::config::{Hasher, PoseidonGoldilocksConfig};
 use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Computes a Poseidon hash of the given inputs
-pub fn poseidon_hash<F: Field>(inputs: &[F]) -> F {
-    PoseidonHash::hash_or_noop(inputs)
+pub fn poseidon_hash<F: RichField>(inputs: &[F]) -> F {
+    PoseidonHash::hash_or_noop(inputs).elements[0]
 }
 
 /// Computes a Poseidon hash with domain separation
@@ -131,7 +131,7 @@ pub fn compute_hash_targets<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Computes a hash of the given inputs (alias for poseidon_hash)
-pub fn compute_hash<F: Field>(inputs: &[F]) -> F {
+pub fn compute_hash<F: RichField>(inputs: &[F]) -> F {
     poseidon_hash(inputs)
 }
 
@@ -158,14 +158,14 @@ pub fn hash<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Compute a nullifier hash for a UTXO
-pub fn compute_nullifier<F: Field>(
+pub fn compute_nullifier<F: RichField>(
     owner_pubkey_hash: F,
     asset_id: F,
     amount: F,
     salt: F,
 ) -> F {
     let utxo_hash = poseidon_hash_four(owner_pubkey_hash, asset_id, amount, salt);
-    poseidon_hash_with_domain(&[utxo_hash], 0x01) // Domain 0x01 for nullifiers
+    poseidon_hash_with_domain(&[utxo_hash], domains::NULLIFIER)
 }
 
 /// Compute a nullifier hash for a UTXO in the circuit
@@ -177,7 +177,7 @@ pub fn compute_nullifier_targets<F: RichField + Extendable<D>, const D: usize>(
     salt: Target,
 ) -> Target {
     let utxo_hash = poseidon_hash_four_targets(builder, owner_pubkey_hash, asset_id, amount, salt);
-    poseidon_hash_with_domain_targets(builder, &[utxo_hash], 0x01) // Domain 0x01 for nullifiers
+    poseidon_hash_with_domain_targets(builder, &[utxo_hash], domains::NULLIFIER) // Domain 0x01 for nullifiers
 }
 
 /// Compute a UTXO commitment hash
@@ -209,16 +209,14 @@ pub fn compute_asset_id<F: RichField>(
     max_supply: F,
     is_mintable: F,
 ) -> F {
-    // Create a vector of all inputs
-    let inputs = vec![
-        creator_pubkey_hash,
-        asset_nonce,
-        decimals,
-        max_supply,
-        is_mintable,
-    ];
+    // Compute the asset ID as a hash of the creator's public key hash, nonce, and parameters
+    let mut inputs = Vec::with_capacity(5);
+    inputs.push(creator_pubkey_hash);
+    inputs.push(asset_nonce);
+    inputs.push(decimals);
+    inputs.push(max_supply);
+    inputs.push(is_mintable);
     
-    // Use the Poseidon hash function to compute the asset ID
     poseidon_hash(&inputs)
 }
 
@@ -239,8 +237,8 @@ pub fn compute_asset_id_targets<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Compute a message hash for signature verification
-pub fn compute_message_hash<F: Field>(message_parts: &[F]) -> F {
-    poseidon_hash_with_domain(message_parts, 0x02) // Domain 0x02 for messages
+pub fn compute_message_hash<F: RichField>(message_parts: &[F]) -> F {
+    poseidon_hash_with_domain(message_parts, domains::MESSAGE)
 }
 
 /// Compute a message hash for signature verification in the circuit
@@ -252,8 +250,8 @@ pub fn compute_message_hash_targets<F: RichField + Extendable<D>, const D: usize
 }
 
 /// Compute a Poseidon hash with domain separation for Merkle tree nodes
-pub fn compute_merkle_node_hash<F: Field>(left: F, right: F) -> F {
-    poseidon_hash_with_domain(&[left, right], crate::utils::merkle::MERKLE_DOMAIN)
+pub fn compute_merkle_node_hash<F: RichField>(left: F, right: F) -> F {
+    poseidon_hash_with_domain(&[left, right], domains::MERKLE_TREE)
 }
 
 /// Compute a Poseidon hash with domain separation for Merkle tree nodes in the circuit
@@ -262,14 +260,13 @@ pub fn compute_merkle_node_hash_targets<F: RichField + Extendable<D>, const D: u
     left: Target,
     right: Target,
 ) -> Target {
-    poseidon_hash_with_domain_targets(builder, &[left, right], crate::utils::merkle::MERKLE_DOMAIN)
+    poseidon_hash_with_domain_targets(builder, &[left, right], domains::MERKLE_TREE)
 }
 
 /// Returns the Poseidon hash of an empty input
 pub fn poseidon_hash_empty<F: RichField>() -> F {
-    // Convert the HashOut to the requested field type
-    let hash_out: plonky2::hash::hash_types::HashOut<F> = PoseidonHash::hash_or_noop(&[]);
-    hash_out.elements[0]
+    // Hash an empty slice
+    poseidon_hash::<F>(&[])
 }
 
 /// Returns the Poseidon hash of an empty input in the circuit

@@ -2,7 +2,10 @@
 
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
-use plonky2::iop::target::Target;
+use plonky2::hash::hash_types::RichField;
+use plonky2_field::extension::Extendable;
+use plonky2_field::types::Field64;
+use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 /// Converts a field element to its binary representation
@@ -101,7 +104,7 @@ pub fn cube_field_target<F: Field, const D: usize>(
 }
 
 /// Computes a^n for a field element target in the circuit
-pub fn pow_field_target<F: Field, const D: usize>(
+pub fn pow_field_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
     n: u64,
@@ -124,6 +127,56 @@ pub fn pow_field_target<F: Field, const D: usize>(
         }
         base = builder.mul(base, base);
         exp >>= 1;
+    }
+    
+    result
+}
+
+/// Converts a field element to its binary representation in the circuit (little-endian)
+pub fn field_to_bits_le_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    value: Target,
+    bit_length: usize,
+) -> Vec<BoolTarget> {
+    let mut result = Vec::with_capacity(bit_length);
+    
+    // Use the built-in CircuitBuilder method to split into bits
+    let bits = builder.split_le(value, bit_length);
+    
+    // Convert each bit to a BoolTarget
+    for i in 0..bit_length {
+        result.push(bits[i]);
+    }
+    
+    result
+}
+
+/// Converts a field element to its binary representation in the circuit (little-endian)
+/// This is a duplicate function and should be removed
+/// Use field_to_bits_le_target instead
+#[deprecated(since = "0.1.0", note = "Use field_to_bits_le_target instead")]
+pub fn field_to_bits_le_target_old<F: RichField + Extendable<2>>(
+    builder: &mut CircuitBuilder<F, 2>,
+    value: Target,
+    bit_length: usize,
+) -> Vec<BoolTarget> {
+    field_to_bits_le_target(builder, value, bit_length)
+}
+
+/// Converts a field element to its binary representation in the circuit (little-endian)
+pub fn field_to_bits_le_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    value: Target,
+    bit_length: usize,
+) -> Vec<BoolTarget> {
+    let mut result = Vec::with_capacity(bit_length);
+    
+    // Use the built-in CircuitBuilder method to split into bits
+    let bits = builder.split_le(value, bit_length);
+    
+    // Convert each bit to a BoolTarget
+    for i in 0..bit_length {
+        result.push(bits[i]);
     }
     
     result
