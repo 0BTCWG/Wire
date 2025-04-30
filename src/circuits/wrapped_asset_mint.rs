@@ -5,13 +5,17 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use plonky2::plonk::proof::ProofWithPublicInputs;
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData};
+use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
+use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::recursion::dummy_circuit::DummyCircuitData;
+use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
+
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
 use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
 use crate::gadgets::verify_message_signature;
+use crate::errors::{WireError, WireResult};
 
 /// Represents a signed attestation from a custodian
 #[derive(Clone)]
@@ -44,7 +48,7 @@ pub struct WrappedAssetMintCircuit {
 
 impl WrappedAssetMintCircuit {
     /// Build the wrapped asset mint circuit
-    pub fn build<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
+    pub fn build<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
     ) -> UTXOTarget {
@@ -138,10 +142,10 @@ impl WrappedAssetMintCircuit {
         };
         
         // Build the circuit
-        circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder);
+        circuit.build(&mut builder);
         
         // Build the circuit data
-        builder.build::<PoseidonGoldilocksConfig>()
+        builder.build()
     }
     
     /// Generate a proof for the circuit with the given inputs
@@ -154,7 +158,7 @@ impl WrappedAssetMintCircuit {
         signature_r_x: u64,
         signature_r_y: u64,
         signature_s: u64,
-    ) -> Result<SerializableProof, ProofError> {
+    ) -> WireResult<SerializableProof> {
         // Create the circuit
         let circuit_data = Self::create_circuit();
         
@@ -226,20 +230,22 @@ impl WrappedAssetMintCircuit {
         pw.set_target(signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
         
         // Generate the proof
-        let proof = generate_proof(&circuit_data, pw)?;
+        let proof = circuit_data.prove(pw)
+            .map_err(|e| WireError::ProofError(ProofError::ProofGenerationError(format!("Failed to generate proof: {}", e))))?;
         
         // Serialize the proof
         serialize_proof(&proof)
+            .map_err(|e| WireError::ProofError(e))
     }
     
     /// Verify a proof for the circuit
-    pub fn verify_proof(serializable_proof: &SerializableProof) -> Result<(), String> {
+    pub fn verify_proof(serializable_proof: &SerializableProof) -> WireResult<()> {
         let circuit_data = Self::create_circuit();
         let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
-            .map_err(|e| format!("Failed to deserialize proof: {}", e))?;
+            .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to deserialize proof: {}", e))))?;
         
-        circuit_data.verify(proof.clone())
-            .map_err(|e| format!("Failed to verify proof: {}", e))
+        circuit_data.verify(proof)
+            .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to verify proof: {}", e))))
     }
 }
 
@@ -249,10 +255,9 @@ mod tests {
     
     #[test]
     fn test_wrapped_asset_mint() {
-        // This test verifies that we can create and build the circuit
+        // This is a placeholder test
+        // In a real implementation, this would test the circuit with actual inputs
         let circuit_data = WrappedAssetMintCircuit::create_circuit();
-        
-        // Just verify that the circuit was created successfully
-        assert!(circuit_data.common.gates.len() > 0, "Circuit should have gates");
+        assert!(circuit_data.common.num_public_inputs > 0);
     }
 }

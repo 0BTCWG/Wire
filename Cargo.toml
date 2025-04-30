@@ -5,9 +5,9 @@ edition = "2021"
 
 [dependencies]
 # Plonky2 and core dependencies
-plonky2 = "0.2.1"
-plonky2_field = "0.2.0"
-plonky2_util = "0.2.0"
+plonky2 = "1.0.2"
+plonky2_field = "1.0.0"
+plonky2_util = "1.0.0"
 
 # Cryptographic libraries
 ed25519-dalek = "2.0.0"

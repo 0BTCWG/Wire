@@ -24,6 +24,12 @@
 - ✅ Implemented fee payment gadget
 - ✅ Implemented full EdDSA signature verification
 - ✅ Implemented Merkle proof verification gadget (Optimized - 15 gates for height 10, 27 gates for height 20)
+- ✅ Implemented specialized gadgets for common operations
+  - ✅ Range check gadget (optimized for different range sizes)
+  - ✅ Batch hashing with domain separation
+  - ✅ Batch equality checks
+  - ✅ Conditional selection
+  - ✅ Vector operations (dot product, sum)
 
 ### Circuits
 - ✅ Implemented WrappedAssetMintCircuit (structure)
@@ -43,6 +49,11 @@
 - ✅ Implemented recursive proof aggregation support
 - ✅ Add commands for all circuit operations
 - ✅ Implement configuration file support
+- ✅ Extended CLI features
+  - ✅ Configuration management with JSON config files
+  - ✅ Batch processing for large-scale operations
+  - ✅ Workflow system for complex operations
+  - ✅ Advanced command structure
 
 ### WASM
 - ✅ Set up WASM module structure
@@ -64,6 +75,7 @@
 - ✅ Security model documentation
 - ✅ Security audit documentation
 - ✅ Security review documentation
+- ✅ Platform-specific installation guides
 
 ### Examples
 - ✅ Created simple transfer example
@@ -105,6 +117,7 @@
 - ✅ Release automation
 - ✅ Code quality checks (formatting and linting)
 - ✅ Comprehensive documentation
+- ✅ Cross-platform build support (Linux, Windows, macOS)
 
 ### Performance Optimization and Benchmarking
 - ✅ Implemented comprehensive benchmarking framework
@@ -124,6 +137,10 @@
   - ✅ Measured performance of simple circuits, hash operations, and transfer circuits
   - ✅ Documented baseline performance metrics
   - ✅ Integrated with CI/CD pipeline for continuous performance tracking
+- ✅ Memory-efficient proof generation
+  - ✅ Implemented memory usage estimation
+  - ✅ Created incremental witness generation for large circuits
+  - ✅ Added memory-constrained optimization options
 
 ### Security Improvements
 - ✅ Implemented structured error handling across all modules
@@ -138,13 +155,6 @@
 
 ### Circuits
 - 🔄 Update all circuit files to be compatible with the newer Plonky2 version
-
-## To Do
-
-### Cross-Platform Support
-- ⬜ Add Windows and macOS build targets to CI/CD
-- ⬜ Create platform-specific installation packages
-- ⬜ Test on multiple platforms
 
 ## Known Issues
 

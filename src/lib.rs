@@ -6,13 +6,29 @@
 pub mod core;
 pub mod gadgets;
 pub mod circuits;
-pub mod cli;
 pub mod wasm;
 pub mod utils;
 pub mod errors;
 pub mod tests {
     pub mod fuzz_tests;
 }
+
+// Re-export CLI modules
+pub mod cli;
+pub use cli::{
+    execute_command,
+    generate_keypair,
+    prove_circuit,
+    verify_proof,
+    aggregate_proofs_cli,
+    verify_aggregated_proof_cli,
+    // Advanced CLI features
+    config,
+    batch,
+    workflow,
+    commands,
+    advanced,
+};
 
 use log::info;
 
