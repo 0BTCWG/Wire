@@ -9,6 +9,10 @@ pub mod circuits;
 pub mod cli;
 pub mod wasm;
 pub mod utils;
+pub mod errors;
+pub mod tests {
+    pub mod fuzz_tests;
+}
 
 use log::info;
 

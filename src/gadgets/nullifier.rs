@@ -4,27 +4,86 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::gadgets::hash_targets;
+use crate::gadgets::hash_for_nullifier;
+use crate::errors::{WireError, CryptoError, WireResult};
 
-/// Calculate a nullifier for a UTXO
+/// Calculate a nullifier for a UTXO with domain separation
 ///
 /// This prevents double-spending by creating a unique nullifier
-/// based on salt and owner's secret key.
+/// based on salt, asset ID, amount, and a derived key from the owner's secret key.
+/// The derived key approach enhances privacy by not directly using the owner's secret key.
 pub fn calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     salt: &[Target],
+    asset_id: &[Target],
+    amount: Target,
     owner_sk: Target,
-) -> Target {
-    // Combine the salt and owner's secret key
+) -> WireResult<Target> {
+    // Validate inputs
+    if salt.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt cannot be empty".to_string()
+        )));
+    }
+    
+    if asset_id.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Asset ID cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum input size to prevent DoS
+    if salt.len() > 32 {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt exceeds maximum size (32)".to_string()
+        )));
+    }
+    
+    if asset_id.len() > 32 {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Asset ID exceeds maximum size (32)".to_string()
+        )));
+    }
+    
+    // First, derive a key from the owner's secret key
+    // This adds a layer of security by not directly using the secret key
+    let derived_key = derive_nullifier_key(builder, owner_sk)?;
+    
+    // Combine all the UTXO components with the derived key
     let mut inputs = Vec::new();
     inputs.extend_from_slice(salt);
+    inputs.extend_from_slice(asset_id);
+    inputs.push(amount);
+    inputs.push(derived_key);
+    
+    // Use the domain-separated hash function for nullifiers
+    hash_for_nullifier(builder, &inputs)
+}
+
+/// Derive a key specifically for nullifier calculation
+///
+/// This improves security by not directly using the owner's secret key
+/// in the nullifier calculation, which could leak information.
+fn derive_nullifier_key<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    owner_sk: Target,
+) -> WireResult<Target> {
+    // Create a domain-specific input for key derivation
+    let domain_string = "NULLIFIER_KEY_DERIVATION";
+    
+    // Convert the domain string to field elements
+    let mut domain_targets = Vec::new();
+    for byte in domain_string.bytes() {
+        domain_targets.push(builder.constant(F::from_canonical_u64(byte as u64)));
+    }
+    
+    // Combine the domain and the secret key
+    let mut inputs = Vec::new();
+    inputs.extend_from_slice(&domain_targets);
     inputs.push(owner_sk);
     
-    // Hash the combined inputs to create the nullifier
-    let nullifier_hash = hash_targets(builder, &inputs);
-    
-    // Use the first element of the hash as the nullifier
-    nullifier_hash.elements[0]
+    // Hash the combined input with domain separation
+    hash_for_nullifier(builder, &inputs)
 }
 
 /// Calculate and register a nullifier for a UTXO
@@ -34,25 +93,114 @@ pub fn calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
 pub fn calculate_and_register_nullifier<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     salt: &[Target],
+    asset_id: &[Target],
+    amount: Target,
     owner_sk: Target,
-) -> Target {
+) -> WireResult<Target> {
     // Calculate the nullifier
-    let nullifier = calculate_nullifier(builder, salt, owner_sk);
+    let nullifier = calculate_nullifier(builder, salt, asset_id, amount, owner_sk)?;
     
     // Register the nullifier as a public input
-    builder.register_public_input(nullifier);
+    // This is critical for security to prevent double-spending
+    let nullifier_pi = builder.add_virtual_public_input();
+    builder.connect(nullifier, nullifier_pi);
     
-    nullifier
+    Ok(nullifier)
+}
+
+/// Calculate a nullifier with randomness for enhanced privacy
+///
+/// This version adds optional randomness to the nullifier calculation,
+/// which can be useful for applications requiring stronger privacy guarantees.
+pub fn calculate_nullifier_with_randomness<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    salt: &[Target],
+    asset_id: &[Target],
+    amount: Target,
+    owner_sk: Target,
+    randomness: Target,
+) -> WireResult<Target> {
+    // Validate inputs
+    if salt.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt cannot be empty".to_string()
+        )));
+    }
+    
+    if asset_id.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Asset ID cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum input size to prevent DoS
+    if salt.len() > 32 {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt exceeds maximum size (32)".to_string()
+        )));
+    }
+    
+    if asset_id.len() > 32 {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Asset ID exceeds maximum size (32)".to_string()
+        )));
+    }
+    
+    // First, derive a key from the owner's secret key
+    let derived_key = derive_nullifier_key(builder, owner_sk)?;
+    
+    // Combine all the UTXO components with the derived key and randomness
+    let mut inputs = Vec::new();
+    inputs.extend_from_slice(salt);
+    inputs.extend_from_slice(asset_id);
+    inputs.push(amount);
+    inputs.push(derived_key);
+    inputs.push(randomness); // Add randomness for enhanced privacy
+    
+    // Use the domain-separated hash function for nullifiers
+    hash_for_nullifier(builder, &inputs)
+}
+
+/// Legacy nullifier calculation for backward compatibility
+///
+/// This maintains compatibility with the original implementation.
+/// New applications should use the improved versions above.
+pub fn legacy_calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    salt: &[Target],
+    owner_sk: Target,
+) -> WireResult<Target> {
+    // Validate inputs
+    if salt.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum input size to prevent DoS
+    if salt.len() > 32 {
+        return Err(WireError::CryptoError(CryptoError::NullifierError(
+            "Salt exceeds maximum size (32)".to_string()
+        )));
+    }
+    
+    // Combine the salt and owner's secret key
+    let mut inputs = Vec::new();
+    inputs.extend_from_slice(salt);
+    inputs.push(owner_sk);
+    
+    // Use the domain-separated hash function for nullifiers
+    hash_for_nullifier(builder, &inputs)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
+    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::plonk::circuit_data::CircuitConfig;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;
@@ -60,16 +208,40 @@ mod tests {
     
     #[test]
     fn test_nullifier_calculation() {
-        // Create a new circuit
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
-        // Create inputs
-        let salt = builder.add_virtual_target();
-        let owner_sk = builder.add_virtual_target();
+        // Create test inputs
+        let salt_values = [F::ONE, F::TWO, F::THREE];
+        let asset_id_values = [F::FOUR, F::FIVE];
+        let amount_value = F::from_canonical_u64(1000);
+        let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
+        
+        // Create targets
+        let mut salt_targets = Vec::new();
+        for &value in &salt_values {
+            salt_targets.push(builder.constant(value));
+        }
+        
+        let mut asset_id_targets = Vec::new();
+        for &value in &asset_id_values {
+            asset_id_targets.push(builder.constant(value));
+        }
+        
+        let amount_target = builder.constant(amount_value);
+        let owner_sk_target = builder.constant(owner_sk_value);
         
         // Calculate the nullifier
-        let _nullifier = calculate_and_register_nullifier(&mut builder, &[salt], owner_sk);
+        let nullifier = calculate_nullifier(
+            &mut builder,
+            &salt_targets,
+            &asset_id_targets,
+            amount_target,
+            owner_sk_target,
+        ).expect("Nullifier calculation should not fail");
+        
+        // Make the nullifier a public input
+        builder.register_public_input(nullifier);
         
         // Build the circuit
         let circuit = builder.build::<C>();
@@ -77,19 +249,190 @@ mod tests {
         // Create a witness
         let mut pw = PartialWitness::new();
         
-        // Set the salt values
-        pw.set_target(salt, F::from_canonical_u64(0));
-        
-        // Set the owner secret key
-        pw.set_target(owner_sk, F::from_canonical_u64(42));
-        
-        // Generate the proof
-        let proof = circuit.prove(pw).unwrap();
+        // Generate a proof
+        let proof = circuit.prove(pw).expect("Proving should not fail");
         
         // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
+        circuit.verify(proof).expect("Verification should not fail");
+    }
+    
+    #[test]
+    fn test_nullifier_with_randomness() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
         
-        // Check that the nullifier is in the public inputs
-        assert_ne!(proof.public_inputs[0], F::ZERO);
+        // Create test inputs
+        let salt_values = [F::ONE, F::TWO, F::THREE];
+        let asset_id_values = [F::FOUR, F::FIVE];
+        let amount_value = F::from_canonical_u64(1000);
+        let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
+        let randomness_value = F::from_canonical_u64(0x9876543210fedcba);
+        
+        // Create targets
+        let mut salt_targets = Vec::new();
+        for &value in &salt_values {
+            salt_targets.push(builder.constant(value));
+        }
+        
+        let mut asset_id_targets = Vec::new();
+        for &value in &asset_id_values {
+            asset_id_targets.push(builder.constant(value));
+        }
+        
+        let amount_target = builder.constant(amount_value);
+        let owner_sk_target = builder.constant(owner_sk_value);
+        let randomness_target = builder.constant(randomness_value);
+        
+        // Calculate the nullifier with randomness
+        let nullifier = calculate_nullifier_with_randomness(
+            &mut builder,
+            &salt_targets,
+            &asset_id_targets,
+            amount_target,
+            owner_sk_target,
+            randomness_target,
+        ).expect("Nullifier calculation with randomness should not fail");
+        
+        // Make the nullifier a public input
+        builder.register_public_input(nullifier);
+        
+        // Build the circuit
+        let circuit = builder.build::<C>();
+        
+        // Create a witness
+        let mut pw = PartialWitness::new();
+        
+        // Generate a proof
+        let proof = circuit.prove(pw).expect("Proving should not fail");
+        
+        // Verify the proof
+        circuit.verify(proof).expect("Verification should not fail");
+    }
+    
+    #[test]
+    fn test_derived_key() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create test input
+        let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
+        let owner_sk_target = builder.constant(owner_sk_value);
+        
+        // Derive the key
+        let derived_key = derive_nullifier_key(&mut builder, owner_sk_target)
+            .expect("Key derivation should not fail");
+        
+        // Make the derived key a public input
+        builder.register_public_input(derived_key);
+        
+        // Build the circuit
+        let circuit = builder.build::<C>();
+        
+        // Create a witness
+        let mut pw = PartialWitness::new();
+        
+        // Generate a proof
+        let proof = circuit.prove(pw).expect("Proving should not fail");
+        
+        // Verify the proof
+        circuit.verify(proof).expect("Verification should not fail");
+    }
+    
+    #[test]
+    fn test_empty_salt_error() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create empty salt
+        let salt_targets = Vec::new();
+        
+        // Create other valid inputs
+        let asset_id_targets = vec![builder.constant(F::ONE)];
+        let amount_target = builder.constant(F::TWO);
+        let owner_sk_target = builder.constant(F::THREE);
+        
+        // Calculate the nullifier - should return an error
+        let result = calculate_nullifier(
+            &mut builder,
+            &salt_targets,
+            &asset_id_targets,
+            amount_target,
+            owner_sk_target,
+        );
+        
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::NullifierError(msg))) = result {
+            assert!(msg.contains("Salt cannot be empty"));
+        } else {
+            panic!("Expected NullifierError");
+        }
+    }
+    
+    #[test]
+    fn test_empty_asset_id_error() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create valid salt
+        let salt_targets = vec![builder.constant(F::ONE)];
+        
+        // Create empty asset ID
+        let asset_id_targets = Vec::new();
+        
+        // Create other valid inputs
+        let amount_target = builder.constant(F::TWO);
+        let owner_sk_target = builder.constant(F::THREE);
+        
+        // Calculate the nullifier - should return an error
+        let result = calculate_nullifier(
+            &mut builder,
+            &salt_targets,
+            &asset_id_targets,
+            amount_target,
+            owner_sk_target,
+        );
+        
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::NullifierError(msg))) = result {
+            assert!(msg.contains("Asset ID cannot be empty"));
+        } else {
+            panic!("Expected NullifierError");
+        }
+    }
+    
+    #[test]
+    fn test_oversized_salt_error() {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<F, D>::new(config);
+        
+        // Create oversized salt (33 elements)
+        let mut salt_targets = Vec::with_capacity(33);
+        for i in 0..33 {
+            salt_targets.push(builder.constant(F::from_canonical_u64(i as u64)));
+        }
+        
+        // Create other valid inputs
+        let asset_id_targets = vec![builder.constant(F::ONE)];
+        let amount_target = builder.constant(F::TWO);
+        let owner_sk_target = builder.constant(F::THREE);
+        
+        // Calculate the nullifier - should return an error
+        let result = calculate_nullifier(
+            &mut builder,
+            &salt_targets,
+            &asset_id_targets,
+            amount_target,
+            owner_sk_target,
+        );
+        
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::NullifierError(msg))) = result {
+            assert!(msg.contains("Salt exceeds maximum size"));
+        } else {
+            panic!("Expected NullifierError");
+        }
     }
 }

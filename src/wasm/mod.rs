@@ -9,7 +9,7 @@ use serde::{Serialize, Deserialize};
 #[cfg(feature = "wasm")]
 use serde_wasm_bindgen;
 use serde_json::json;
-use log::{info, error};
+use log::{info, error, warn};
 use rand::{rngs::OsRng, RngCore};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer};
 use plonky2::iop::target::Target;
@@ -19,6 +19,28 @@ use plonky2::plonk::circuit_data::CircuitData;
 use plonky2::plonk::proof::ProofWithPublicInputs;
 #[cfg(feature = "wasm")]
 use std::convert::TryFrom;
+
+// Import validation module
+pub mod validation;
+#[cfg(feature = "wasm")]
+use validation::{
+    ValidationError,
+    validate_hex_string,
+    validate_public_key,
+    validate_private_key,
+    validate_signature,
+    validate_hash,
+    validate_salt,
+    validate_asset_id,
+    validate_circuit_type,
+    validate_batch_size,
+    validate_proof_structure,
+    validate_proofs_array,
+    validate_aggregation_options,
+    validate_wrapped_asset_mint_params,
+    validate_wrapped_asset_burn_params,
+    validate_transfer_params,
+};
 
 // Import utility functions
 use crate::utils::{
@@ -63,21 +85,26 @@ pub fn start() -> Result<(), JsValue> {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn generate_keypair() -> Result<JsValue, JsValue> {
-    let mut csprng = OsRng{};
-    let mut secret_key_bytes = [0u8; 32];
-    csprng.fill_bytes(&mut secret_key_bytes);
+    console::log_1(&JsValue::from_str("Generating new Ed25519 keypair"));
     
-    let signing_key = SigningKey::from_bytes(&secret_key_bytes);
+    // Use a secure random number generator
+    let mut csprng = OsRng{};
+    
+    // Generate a new keypair using ed25519-dalek
+    let signing_key = SigningKey::generate(&mut csprng);
     let verifying_key = VerifyingKey::from(&signing_key);
     
-    let secret_key_hex = hex::encode(secret_key_bytes);
-    let public_key_hex = hex::encode(verifying_key.to_bytes());
+    // Convert to bytes
+    let private_key = signing_key.to_bytes();
+    let public_key = verifying_key.to_bytes();
     
+    // Create JSON representation with domain separation in field names
     let result = json!({
-        "secretKey": format!("0x{}", secret_key_hex),
-        "publicKey": format!("0x{}", public_key_hex),
+        "secretKey": format!("0x{}", hex::encode(private_key)),
+        "publicKey": format!("0x{}", hex::encode(public_key)),
     });
     
+    // Return the result
     serde_wasm_bindgen::to_value(&result)
         .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
 }
@@ -86,17 +113,19 @@ pub fn generate_keypair() -> Result<JsValue, JsValue> {
 #[cfg(feature = "wasm")]
 #[wasm_bindgen]
 pub fn sign_message(secret_key_hex: &str, message_hex: &str) -> Result<JsValue, JsValue> {
-    // Remove 0x prefix if present
-    let secret_key_hex = secret_key_hex.trim_start_matches("0x");
-    let message_hex = message_hex.trim_start_matches("0x");
+    console::log_1(&JsValue::from_str("Signing message with Ed25519 key"));
     
-    // Decode the secret key
-    let secret_key_bytes = hex::decode(secret_key_hex)
-        .map_err(|e| JsValue::from_str(&format!("Failed to decode secret key: {}", e)))?;
+    // Validate the secret key
+    let secret_key_bytes = match validate_private_key(secret_key_hex, "secretKey") {
+        Ok(bytes) => bytes,
+        Err(e) => return Err(e.to_js_error()),
+    };
     
-    if secret_key_bytes.len() != 32 {
-        return Err(JsValue::from_str(&format!("Invalid secret key length: {}, expected 32", secret_key_bytes.len())));
-    }
+    // Validate the message
+    let message = match validate_hex_string(message_hex, "message", None) {
+        Ok(bytes) => bytes,
+        Err(e) => return Err(e.to_js_error()),
+    };
     
     // Create a fixed-size array from the Vec<u8>
     let mut key_bytes = [0u8; 32];
@@ -105,16 +134,14 @@ pub fn sign_message(secret_key_hex: &str, message_hex: &str) -> Result<JsValue, 
     // Create the secret key
     let signing_key = SigningKey::from_bytes(&key_bytes);
     
-    // Decode the message
-    let message = hex::decode(message_hex)
-        .map_err(|e| JsValue::from_str(&format!("Failed to decode message: {}", e)))?;
-    
     // Sign the message
     let signature = signing_key.sign(&message);
     
-    // Return the signature
+    // Return the signature with domain separation in field names
     let result = json!({
         "signature": format!("0x{}", hex::encode(signature.to_bytes())),
+        "r": format!("0x{}", hex::encode(&signature.to_bytes()[0..32])),
+        "s": format!("0x{}", hex::encode(&signature.to_bytes()[32..64])),
     });
     
     serde_wasm_bindgen::to_value(&result)
@@ -128,44 +155,33 @@ pub fn prove_wrapped_asset_mint(params: &JsValue) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Generating proof for wrapped asset mint..."));
     
     // Parse the parameters
-    let params: serde_json::Value = serde_wasm_bindgen::from_value(params.clone())
+    let params_value: serde_json::Value = serde_wasm_bindgen::from_value(params.clone())
         .map_err(|e| JsValue::from_str(&format!("Failed to parse parameters: {}", e)))?;
     
-    // Extract the parameters
-    let recipient_pk_hash_hex = params["recipientPkHash"].as_str()
-        .ok_or_else(|| JsValue::from_str("Missing recipientPkHash"))?
+    // Validate all parameters
+    match validate_wrapped_asset_mint_params(&params_value) {
+        Ok(_) => {},
+        Err(e) => return Err(e.to_js_error()),
+    }
+    
+    // Extract the parameters (already validated)
+    let recipient_pk_hash_hex = params_value["recipientPkHash"].as_str().unwrap()
         .trim_start_matches("0x");
     
-    let recipient_pk_hash = hex::decode(recipient_pk_hash_hex)
-        .map_err(|e| JsValue::from_str(&format!("Failed to decode recipientPkHash: {}", e)))?;
+    let recipient_pk_hash = hex::decode(recipient_pk_hash_hex).unwrap();
     
-    let amount = params["amount"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid amount"))?;
+    let amount = params_value["amount"].as_u64().unwrap();
+    let deposit_nonce = params_value["depositNonce"].as_u64().unwrap();
+    let custodian_pk_x = params_value["custodianPkX"].as_u64().unwrap();
+    let custodian_pk_y = params_value["custodianPkY"].as_u64().unwrap();
+    let signature_r_x = params_value["signatureRX"].as_u64().unwrap();
+    let signature_r_y = params_value["signatureRY"].as_u64().unwrap();
+    let signature_s = params_value["signatureS"].as_u64().unwrap();
     
-    let deposit_nonce = params["depositNonce"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid depositNonce"))?;
-    
-    let custodian_pk_x = params["custodianPkX"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid custodianPkX"))?;
-    
-    let custodian_pk_y = params["custodianPkY"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid custodianPkY"))?;
-    
-    let signature_r_x = params["signatureRX"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid signatureRX"))?;
-    
-    let signature_r_y = params["signatureRY"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid signatureRY"))?;
-    
-    let signature_s = params["signatureS"].as_u64()
-        .ok_or_else(|| JsValue::from_str("Missing or invalid signatureS"))?;
-    
-    let salt_hex = params["salt"].as_str()
-        .ok_or_else(|| JsValue::from_str("Missing salt"))?
+    let salt_hex = params_value["salt"].as_str().unwrap()
         .trim_start_matches("0x");
     
-    let salt = hex::decode(salt_hex)
-        .map_err(|e| JsValue::from_str(&format!("Failed to decode salt: {}", e)))?;
+    let salt = hex::decode(salt_hex).unwrap();
     
     // Generate the proof using the static method
     let proof_result = WrappedAssetMintCircuit::generate_proof(
@@ -179,7 +195,7 @@ pub fn prove_wrapped_asset_mint(params: &JsValue) -> Result<JsValue, JsValue> {
         signature_s,
     ).map_err(|e| JsValue::from_str(&format!("Failed to generate proof: {}", e)))?;
     
-    // Return the proof
+    // Return the proof with domain separation in field names
     let result = json!({
         "success": true,
         "circuitType": "WrappedAssetMint",
@@ -720,7 +736,7 @@ pub fn verify_proof(
             
             // In a real implementation, we would use the circuit_data to verify the proof
             // For now, we'll just check that the proof structure is valid
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         "WrappedAssetBurn" => {
             console::log_1(&JsValue::from_str("Verifying WrappedAssetBurn proof"));
@@ -729,7 +745,7 @@ pub fn verify_proof(
             let _circuit_data = WrappedAssetBurnCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         "Transfer" => {
             console::log_1(&JsValue::from_str("Verifying Transfer proof"));
@@ -738,7 +754,7 @@ pub fn verify_proof(
             let _circuit_data = TransferCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         "NativeAssetCreate" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetCreate proof"));
@@ -747,7 +763,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetCreateCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         "NativeAssetMint" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetMint proof"));
@@ -756,7 +772,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetMintCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         "NativeAssetBurn" => {
             console::log_1(&JsValue::from_str("Verifying NativeAssetBurn proof"));
@@ -765,7 +781,7 @@ pub fn verify_proof(
             let _circuit_data = NativeAssetBurnCircuit::create_circuit();
             
             // In a real implementation, we would use the circuit_data to verify the proof
-            verify_proof_structure(&proof_data)?
+            validate_proof_structure(&proof_data)?
         },
         _ => {
             return Err(JsValue::from_str(&format!("Unknown circuit type: {}", circuit_type)));
@@ -783,7 +799,7 @@ pub fn verify_proof(
 
 // Helper function to verify the structure of a proof
 #[cfg(feature = "wasm")]
-fn verify_proof_structure(proof: &js_sys::Object) -> Result<bool, JsValue> {
+fn validate_proof_structure(proof: &js_sys::Object) -> Result<bool, JsValue> {
     // Check that the proof has the expected structure
     let commitments_js = js_sys::Reflect::get(proof, &JsValue::from_str("commitments"))?;
     let commitments = js_sys::Array::from(&commitments_js);
@@ -849,104 +865,99 @@ pub fn aggregate_proofs(
 ) -> Result<JsValue, JsValue> {
     console::log_1(&JsValue::from_str("Aggregating proofs..."));
     
-    // Parse options
-    let options_obj: js_sys::Object = options_js.dyn_into()
-        .map_err(|_| JsValue::from_str("Options must be an object"))?;
+    // Validate the proofs array
+    let proofs_value = match validate_proofs_array(&proofs_array) {
+        Ok(proofs) => proofs,
+        Err(e) => return Err(e.to_js_error()),
+    };
     
-    let verbose = js_sys::Reflect::get(&options_obj, &JsValue::from_str("verbose"))
-        .map(|v| v.as_bool().unwrap_or(false))
-        .unwrap_or(false);
+    // Validate the options
+    let (batch_size, verbose) = match validate_aggregation_options(&options_js) {
+        Ok(options) => options,
+        Err(e) => return Err(e.to_js_error()),
+    };
     
-    let batch_size = js_sys::Reflect::get(&options_obj, &JsValue::from_str("batchSize"))
-        .map(|v| v.as_f64().map(|n| n as usize).unwrap_or(4))
-        .unwrap_or(4);
-    
-    // Parse proofs array
-    let proofs_js_array: js_sys::Array = proofs_array.dyn_into()
-        .map_err(|_| JsValue::from_str("Proofs must be an array"))?;
-    
-    if proofs_js_array.length() == 0 {
-        return Err(JsValue::from_str("No proofs provided"));
+    if verbose {
+        console::log_1(&JsValue::from_str(&format!("Aggregating {} proofs with batch size {}", proofs_value.len(), batch_size)));
     }
     
-    // Extract circuit type from the first proof
-    let first_proof_js = proofs_js_array.get(0);
-    let first_proof_obj: js_sys::Object = first_proof_js.dyn_into()
-        .map_err(|_| JsValue::from_str("Proof must be an object"))?;
+    // Create a dummy circuit for proof conversion
+    let circuit_type = "transfer"; // Default circuit type
+    let circuit = match create_dummy_circuit(circuit_type) {
+        Ok(circuit) => circuit,
+        Err(e) => return Err(e),
+    };
     
-    let circuit_type = js_sys::Reflect::get(&first_proof_obj, &JsValue::from_str("circuit_type"))
-        .map_err(|_| JsValue::from_str("Failed to get circuit_type from proof"))?
-        .as_string()
-        .ok_or_else(|| JsValue::from_str("circuit_type must be a string"))?;
+    // Convert proofs to ProofWithPublicInputs
+    let mut proofs = Vec::with_capacity(proofs_value.len());
     
-    // Convert JS proofs to Rust proofs
-    let mut proofs = Vec::with_capacity(proofs_js_array.length() as usize);
-    
-    for i in 0..proofs_js_array.length() {
-        let proof_js = proofs_js_array.get(i);
-        let proof_obj: js_sys::Object = proof_js.dyn_into()
-            .map_err(|_| JsValue::from_str("Proof must be an object"))?;
-        
-        // Verify the proof structure
-        verify_proof_structure(&proof_obj)?;
-        
+    for (i, proof_value) in proofs_value.iter().enumerate() {
         // Convert to SerializableProof
-        let serializable_proof: SerializableProof = serde_wasm_bindgen::from_value(proof_js)
-            .map_err(|e| JsValue::from_str(&format!("Failed to parse proof: {}", e)))?;
-        
-        // Create a dummy circuit to get common data
-        let circuit = create_dummy_circuit(&circuit_type)?;
+        let serializable_proof: SerializableProof = match serde_json::from_value(proof_value.clone()) {
+            Ok(proof) => proof,
+            Err(e) => {
+                return Err(JsValue::from_str(&format!(
+                    "Failed to convert proof at index {}: {}", i, e
+                )));
+            }
+        };
         
         // Convert to ProofWithPublicInputs
-        let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
-            .map_err(|e| JsValue::from_str(&format!("Failed to convert proof: {}", e)))?;
+        let proof = match serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common) {
+            Ok(proof) => proof,
+            Err(e) => {
+                return Err(JsValue::from_str(&format!(
+                    "Failed to convert proof at index {}: {}", i, e
+                )));
+            }
+        };
         
         proofs.push(proof);
-        
-        if verbose {
-            console::log_1(&JsValue::from_str(&format!("Loaded proof {}/{}", i + 1, proofs_js_array.length())));
-        }
     }
     
-    console::log_1(&JsValue::from_str(&format!("Loaded {} proofs", proofs.len())));
-    
-    // Aggregate the proofs
+    // Set up options for recursive aggregation
     let options = RecursiveProverOptions {
         verbose,
         max_proofs_per_step: Some(batch_size),
     };
     
-    console::log_1(&JsValue::from_str(&format!("Aggregating proofs with batch size: {}", batch_size)));
-    let result = recursive_aggregate_proofs(proofs, options)
-        .map_err(|e| JsValue::from_str(&format!("Failed to aggregate proofs: {}", e)))?;
+    // Aggregate the proofs
+    let start_time = js_sys::Date::now();
     
-    console::log_1(&JsValue::from_str(&format!("Successfully aggregated {} proofs", result.num_proofs)));
-    console::log_1(&JsValue::from_str(&format!("Aggregation time: {:?}", result.generation_time)));
+    let result = match recursive_aggregate_proofs(proofs, options) {
+        Ok(result) => result,
+        Err(e) => {
+            return Err(JsValue::from_str(&format!(
+                "Failed to aggregate proofs: {}", e
+            )));
+        }
+    };
+    
+    let end_time = js_sys::Date::now();
+    let duration_ms = end_time - start_time;
+    
+    if verbose {
+        console::log_1(&JsValue::from_str(&format!(
+            "Aggregated {} proofs in {:.2} seconds",
+            result.num_proofs,
+            duration_ms / 1000.0
+        )));
+    }
     
     // Convert back to SerializableProof
     let serializable = SerializableProof::from(result.proof);
     
-    // Create result object
-    let js_result = js_sys::Object::new();
+    // Create the result object
+    let js_result = json!({
+        "success": true,
+        "proof": serializable,
+        "num_proofs": result.num_proofs,
+        "generation_time_ms": duration_ms,
+        "circuit_type": circuit_type,
+    });
     
-    // Add proof data
-    let proof_js = serde_wasm_bindgen::to_value(&serializable)
-        .map_err(|e| JsValue::from_str(&format!("Failed to serialize proof: {}", e)))?;
-    
-    js_sys::Reflect::set(&js_result, &JsValue::from_str("proof"), &proof_js)
-        .map_err(|_| JsValue::from_str("Failed to set proof in result"))?;
-    
-    // Add metadata
-    js_sys::Reflect::set(&js_result, &JsValue::from_str("numProofs"), &JsValue::from_f64(result.num_proofs as f64))
-        .map_err(|_| JsValue::from_str("Failed to set numProofs in result"))?;
-    
-    js_sys::Reflect::set(&js_result, &JsValue::from_str("generationTime"), &JsValue::from_f64(result.generation_time.as_secs_f64()))
-        .map_err(|_| JsValue::from_str("Failed to set generationTime in result"))?;
-    
-    js_sys::Reflect::set(&js_result, &JsValue::from_str("circuit_type"), &JsValue::from_str(&circuit_type))
-        .map_err(|_| JsValue::from_str("Failed to set circuit_type in result"))?;
-    
-    Ok(js_result.into())
+    serde_wasm_bindgen::to_value(&js_result)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
 }
 
 // Verify an aggregated proof
@@ -956,49 +967,66 @@ pub fn verify_aggregated_proof(
     proof_js: JsValue,
     circuit_type: String,
 ) -> Result<JsValue, JsValue> {
-    console::log_1(&JsValue::from_str("Verifying aggregated proof..."));
+    console::log_1(&JsValue::from_str(&format!("Verifying aggregated proof for circuit type: {}", circuit_type)));
     
-    // Verify the proof structure
-    let proof_obj: js_sys::Object = proof_js.dyn_into()
-        .map_err(|_| JsValue::from_str("Proof must be an object"))?;
+    // Validate the circuit type
+    let validated_circuit_type = match validate_circuit_type(&circuit_type) {
+        Ok(circuit_type) => circuit_type,
+        Err(e) => return Err(e.to_js_error()),
+    };
     
-    verify_proof_structure(&proof_obj)?;
+    // Parse the proof
+    let proof_value: serde_json::Value = match serde_wasm_bindgen::from_value(proof_js.clone()) {
+        Ok(value) => value,
+        Err(e) => return Err(JsValue::from_str(&format!("Failed to parse proof: {}", e))),
+    };
+    
+    // Validate the proof structure
+    match validate_proof_structure(&proof_value) {
+        Ok(_) => {},
+        Err(e) => return Err(e.to_js_error()),
+    }
+    
+    // Create a dummy circuit for verification
+    let circuit = match create_dummy_circuit(&validated_circuit_type) {
+        Ok(circuit) => circuit,
+        Err(e) => return Err(e),
+    };
     
     // Convert to SerializableProof
-    let serializable_proof: SerializableProof = serde_wasm_bindgen::from_value(proof_js)
-        .map_err(|e| JsValue::from_str(&format!("Failed to parse proof: {}", e)))?;
-    
-    // Create a dummy circuit
-    let circuit = create_dummy_circuit(&circuit_type)?;
+    let serializable_proof: SerializableProof = match serde_wasm_bindgen::from_value(proof_js) {
+        Ok(proof) => proof,
+        Err(e) => return Err(JsValue::from_str(&format!("Failed to convert proof: {}", e))),
+    };
     
     // Convert to ProofWithPublicInputs
-    let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common)
-        .map_err(|e| JsValue::from_str(&format!("Failed to convert proof: {}", e)))?;
+    let proof = match serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit.common) {
+        Ok(proof) => proof,
+        Err(e) => return Err(JsValue::from_str(&format!("Failed to convert proof: {}", e))),
+    };
     
-    // Verify the aggregated proof
-    let start = js_sys::Date::now();
-    let verified_count = recursive_verify_aggregated_proof(&proof, &circuit)
-        .map_err(|e| JsValue::from_str(&format!("Failed to verify aggregated proof: {}", e)))?;
-    let verification_time = (js_sys::Date::now() - start) / 1000.0;
+    // Verify the proof
+    let start_time = js_sys::Date::now();
     
-    console::log_1(&JsValue::from_str("Verification successful!"));
-    console::log_1(&JsValue::from_str(&format!("Verified {} proofs in {:.2}s", verified_count, verification_time)));
-    console::log_1(&JsValue::from_str(&format!("Verification throughput: {:.2} proofs/second", 
-        verified_count as f64 / verification_time)));
+    let verified_count = match recursive_verify_aggregated_proof(&proof, &circuit) {
+        Ok(count) => count,
+        Err(e) => return Err(JsValue::from_str(&format!("Failed to verify proof: {}", e))),
+    };
     
-    // Create result object
-    let result = js_sys::Object::new();
+    let end_time = js_sys::Date::now();
+    let duration_ms = end_time - start_time;
     
-    js_sys::Reflect::set(&result, &JsValue::from_str("valid"), &JsValue::from_bool(true))
-        .map_err(|_| JsValue::from_str("Failed to set valid in result"))?;
+    // Create the result object
+    let result = json!({
+        "success": true,
+        "verified": true,
+        "num_proofs": verified_count,
+        "verification_time_ms": duration_ms,
+        "throughput": (verified_count as f64) / (duration_ms as f64 / 1000.0),
+    });
     
-    js_sys::Reflect::set(&result, &JsValue::from_str("numProofs"), &JsValue::from_f64(verified_count as f64))
-        .map_err(|_| JsValue::from_str("Failed to set numProofs in result"))?;
-    
-    js_sys::Reflect::set(&result, &JsValue::from_str("verificationTime"), &JsValue::from_f64(verification_time))
-        .map_err(|_| JsValue::from_str("Failed to set verificationTime in result"))?;
-    
-    Ok(result.into())
+    serde_wasm_bindgen::to_value(&result)
+        .map_err(|e| JsValue::from_str(&format!("Failed to serialize result: {}", e)))
 }
 
 // Create a dummy circuit for proof conversion and verification

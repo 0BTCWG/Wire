@@ -7,292 +7,371 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget};
 use crate::gadgets::{hash_targets, is_equal};
 use crate::gadgets::ed25519::{is_on_curve, optimized_scalar_multiply, point_add, get_base_point};
+use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Verify an EdDSA signature
 ///
-/// This implements the full EdDSA verification algorithm:
-/// 1. Verify that r_point is on the curve
-/// 2. Compute h = H(R, A, M)
-/// 3. Compute S·G
-/// 4. Compute h·A
-/// 5. Compute R + h·A
-/// 6. Verify that S·G = R + h·A
-pub fn verify_eddsa_signature<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    sig: &SignatureTarget,
-    msg_hash: Target,
-    pk: &PublicKeyTarget,
-) -> Target {
-    // Step 1: Verify that r_point is on the curve
-    // is_on_curve returns a Target, not a BoolTarget
-    let r_on_curve = is_on_curve(builder, &sig.r_point);
-    
-    // Step 2: Compute h = H(R, A, M)
-    // Create a message combining R, A, and M
-    let mut combined_message = Vec::new();
-    combined_message.push(sig.r_point.x);
-    combined_message.push(sig.r_point.y);
-    combined_message.push(pk.point.x);
-    combined_message.push(pk.point.y);
-    combined_message.push(msg_hash);
-    
-    // Hash the combined message to get h
-    let h = hash_targets(builder, &combined_message).elements[0];
-    
-    // Step 3: Compute S·G
-    // Get the base point G
-    let base_point = get_base_point(builder);
-    
-    // Compute S·G using optimized scalar multiplication
-    let s_times_g = optimized_scalar_multiply(builder, sig.s_scalar, &base_point);
-    
-    // Step 4: Compute h·A
-    // Compute h·A where A is the public key using optimized scalar multiplication
-    let h_times_a = optimized_scalar_multiply(builder, h, &pk.point);
-    
-    // Step 5: Compute R + h·A
-    let r_plus_ha = point_add(builder, &sig.r_point, &h_times_a);
-    
-    // Step 6: Verify that S·G = R + h·A
-    // Check if the x coordinates are equal
-    let x_equal = builder.is_equal(s_times_g.x, r_plus_ha.x);
-    
-    // Check if the y coordinates are equal
-    let y_equal = builder.is_equal(s_times_g.y, r_plus_ha.y);
-    
-    // Both x and y must be equal for the points to be equal
-    // Convert BoolTarget to Target (0 or 1) and combine with AND operation
-    let one = builder.one();
-    let zero = builder.zero();
-    
-    // Optimize by using a single select operation
-    let points_equal_bool = builder.and(x_equal, y_equal);
-    let points_equal = builder.select(points_equal_bool, one, zero);
-    
-    // The signature is valid if r_point is on the curve AND the equation holds
-    builder.mul(r_on_curve, points_equal)
-}
-
-/// A stub implementation of EdDSA signature verification that always returns true (1)
-/// This is used for testing purposes only
-pub fn stub_verify_eddsa_signature<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    _sig: &SignatureTarget,
-    _msg_hash: Target,
-    _pk: &PublicKeyTarget,
-) -> Target {
-    builder.one()
-}
-
-/// Verify that a message was signed by the owner of a public key
-///
-/// This function:
-/// 1. Hashes the message to create a message hash
-/// 2. Verifies the EdDSA signature using the message hash and public key
+/// This function verifies that a signature is valid for a given message and public key
+/// The verification algorithm is based on the EdDSA specification
 pub fn verify_message_signature<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     message: &[Target],
     signature: &SignatureTarget,
     public_key: &PublicKeyTarget,
-) -> Target {
-    // Hash the message to create a message hash
-    let message_hash = hash_targets(builder, message).elements[0];
+) -> WireResult<Target> {
+    // Validate inputs
+    if message.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Empty message provided for signature verification".to_string()
+        )));
+    }
     
-    // Use the real implementation for production
-    verify_eddsa_signature(builder, signature, message_hash, public_key)
+    // Check for maximum message size to prevent DoS
+    if message.len() > 1024 {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Message too large for signature verification".to_string()
+        )));
+    }
+    
+    // 1. Ensure the public key is on the curve
+    assert_is_on_curve(builder, &public_key.point);
+    
+    // 2. Ensure the signature's R point is on the curve
+    assert_is_on_curve(builder, &signature.r_point);
+    
+    // 3. Compute the message hash using domain separation for signatures
+    let message_hash = crate::gadgets::hash::hash_for_signature(builder, message)?;
+    
+    // 4. Compute h = H(R, A, M)
+    let mut hash_inputs = Vec::new();
+    hash_inputs.push(signature.r_point.x);
+    hash_inputs.push(signature.r_point.y);
+    hash_inputs.push(public_key.point.x);
+    hash_inputs.push(public_key.point.y);
+    hash_inputs.push(message_hash);
+    
+    let h = crate::gadgets::hash::hash_for_signature(builder, &hash_inputs)?;
+    
+    // 5. Compute S * B, where B is the base point
+    let s_b = scalar_mul_base_point(builder, signature.s_scalar);
+    
+    // 6. Compute R + h * A
+    let h_a = scalar_mul(builder, h, &public_key.point);
+    let r_plus_h_a = point_add(builder, &signature.r_point, &h_a);
+    
+    // 7. Check if S * B == R + h * A
+    let is_x_equal = builder.is_equal(s_b.x, r_plus_h_a.x);
+    let is_y_equal = builder.is_equal(s_b.y, r_plus_h_a.y);
+    
+    // Both x and y coordinates must be equal
+    let is_valid = builder.and(is_x_equal, is_y_equal);
+    
+    // Convert BoolTarget to Target (0 or 1)
+    let zero = builder.zero();
+    let one = builder.one();
+    Ok(builder.select(is_valid, one, zero))
 }
 
-/// Verify multiple EdDSA signatures in a batch
+/// Batch verify multiple EdDSA signatures
 ///
-/// This is more efficient than verifying each signature individually
-/// because it uses a randomized batch verification technique.
+/// This function verifies multiple signatures in a batch, which is more efficient
+/// than verifying them individually.
+///
+/// Returns a target that is 1 if all signatures are valid, and 0 otherwise.
 pub fn batch_verify_signatures<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
+    messages: &[Vec<Target>],
     signatures: &[SignatureTarget],
-    message_hashes: &[Target],
     public_keys: &[PublicKeyTarget],
-) -> Target {
-    assert_eq!(signatures.len(), message_hashes.len());
-    assert_eq!(signatures.len(), public_keys.len());
-    
-    if signatures.is_empty() {
-        return builder.one(); // Empty batch is trivially valid
+) -> WireResult<Target> {
+    // Validate inputs
+    if messages.len() != signatures.len() || messages.len() != public_keys.len() {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Mismatched number of messages, signatures, and public keys".to_string()
+        )));
     }
     
-    if signatures.len() == 1 {
-        // For a single signature, just use the regular verification
-        return verify_eddsa_signature(builder, &signatures[0], message_hashes[0], &public_keys[0]);
+    // Check for maximum batch size to prevent DoS
+    if messages.len() > 256 {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Batch size too large for signature verification".to_string()
+        )));
     }
     
-    // For batch verification, we'll use the following approach:
-    // 1. Generate random weights for each signature
-    // 2. Compute a linear combination of verification equations
-    // 3. Verify the combined equation
-    
-    // Verify that all R points are on the curve
-    let mut all_on_curve = builder.one();
-    for sig in signatures {
-        let r_on_curve = is_on_curve(builder, &sig.r_point);
-        all_on_curve = builder.mul(all_on_curve, r_on_curve);
+    // If there are no signatures to verify, return success
+    if messages.is_empty() {
+        return Ok(builder.one());
     }
     
-    // Get the base point G
-    let base_point = get_base_point(builder);
+    // If there's only one signature, use the regular verification
+    if messages.len() == 1 {
+        return verify_message_signature(
+            builder,
+            &messages[0],
+            &signatures[0],
+            &public_keys[0],
+        );
+    }
     
-    // Compute the combined verification equation
-    let mut combined_s_g = PointTarget {
+    // Initialize a vector to store message hashes
+    let mut messages_hash = Vec::with_capacity(messages.len());
+    
+    // For each signature, ensure the public key and R point are on the curve
+    for (i, (signature, public_key)) in signatures.iter().zip(public_keys.iter()).enumerate() {
+        // Ensure the public key is on the curve
+        assert_is_on_curve(builder, &public_key.point);
+        
+        // Ensure the signature's R point is on the curve
+        assert_is_on_curve(builder, &signature.r_point);
+        
+        // Validate message
+        if messages[i].is_empty() {
+            return Err(WireError::CryptoError(CryptoError::SignatureError(
+                format!("Empty message provided for signature at index {}", i)
+            )));
+        }
+        
+        // Check for maximum message size
+        if messages[i].len() > 1024 {
+            return Err(WireError::CryptoError(CryptoError::SignatureError(
+                format!("Message too large for signature verification at index {}", i)
+            )));
+        }
+        
+        // Compute the message hash
+        let message_hash = crate::gadgets::hash::hash_for_signature(builder, &messages[i])?;
+        messages_hash.push(message_hash);
+    }
+    
+    // Batch verification logic
+    // Generate random weights for the batch verification
+    // In a real implementation, these would be generated from a secure RNG
+    // For now, we'll use a deterministic but unpredictable approach
+    let mut weights = Vec::with_capacity(messages.len());
+    for i in 0..messages.len() {
+        // Create a seed for the weight based on the circuit state
+        let mut seed_inputs = Vec::new();
+        seed_inputs.push(builder.constant(F::from_canonical_u64(i as u64)));
+        seed_inputs.push(signatures[i].r_point.x);
+        seed_inputs.push(public_keys[i].point.x);
+        
+        // Hash the seed to get a pseudorandom weight
+        let weight = crate::gadgets::hash::hash(builder, &seed_inputs)?;
+        weights.push(weight);
+    }
+    
+    // Compute the batch verification equation:
+    // Check if sum(weight_i * S_i) * B == sum(weight_i * R_i) + sum(weight_i * h_i * A_i)
+    
+    // First, compute sum(weight_i * S_i)
+    let mut sum_weighted_s = builder.zero();
+    for (i, signature) in signatures.iter().enumerate() {
+        let weighted_s = builder.mul(weights[i], signature.s_scalar);
+        sum_weighted_s = builder.add(sum_weighted_s, weighted_s);
+    }
+    
+    // Compute sum(weight_i * S_i) * B
+    let sum_weighted_s_b = scalar_mul_base_point(builder, sum_weighted_s);
+    
+    // Compute sum(weight_i * R_i)
+    let mut sum_weighted_r = PointTarget {
         x: builder.zero(),
-        y: builder.one(), // Identity point
+        y: builder.zero(),
     };
+    let mut is_first = true;
     
-    let mut combined_r_ha = PointTarget {
-        x: builder.zero(),
-        y: builder.one(), // Identity point
-    };
-    
-    // Use pseudorandom weights derived from the signatures themselves
-    for i in 0..signatures.len() {
-        let sig = &signatures[i];
-        let pk = &public_keys[i];
-        let msg_hash = message_hashes[i];
-        
-        // Derive a pseudorandom weight from the signature and message
-        // This is a simplified approach - in a real implementation, we would use
-        // a more secure method to generate these weights
-        let mut weight_inputs = Vec::new();
-        weight_inputs.push(sig.r_point.x);
-        weight_inputs.push(sig.r_point.y);
-        weight_inputs.push(msg_hash);
-        weight_inputs.push(builder.constant(F::from_canonical_u64(i as u64)));
-        let weight = hash_targets(builder, &weight_inputs).elements[0];
-        
-        // Compute h = H(R, A, M) for this signature
-        let mut combined_message = Vec::new();
-        combined_message.push(sig.r_point.x);
-        combined_message.push(sig.r_point.y);
-        combined_message.push(pk.point.x);
-        combined_message.push(pk.point.y);
-        combined_message.push(msg_hash);
-        let h = hash_targets(builder, &combined_message).elements[0];
-        
-        // Compute weighted S·G
-        let weighted_s = builder.mul(sig.s_scalar, weight);
-        let s_g = optimized_scalar_multiply(builder, weighted_s, &base_point);
-        
-        // Compute weighted R
+    for (i, signature) in signatures.iter().enumerate() {
+        // Create a weighted R point
+        let weighted_r_x = builder.mul(weights[i], signature.r_point.x);
+        let weighted_r_y = builder.mul(weights[i], signature.r_point.y);
         let weighted_r = PointTarget {
-            x: sig.r_point.x,
-            y: sig.r_point.y,
+            x: weighted_r_x,
+            y: weighted_r_y,
         };
         
-        // Compute weighted h·A
-        let weighted_h = builder.mul(h, weight);
-        let h_a = optimized_scalar_multiply(builder, weighted_h, &pk.point);
-        
-        // Add to the combined points
-        if i == 0 {
-            combined_s_g = s_g;
-            combined_r_ha = point_add(builder, &weighted_r, &h_a);
+        // Add it to the sum
+        if is_first {
+            sum_weighted_r = weighted_r;
+            is_first = false;
         } else {
-            combined_s_g = point_add(builder, &combined_s_g, &s_g);
-            let r_ha = point_add(builder, &weighted_r, &h_a);
-            combined_r_ha = point_add(builder, &combined_r_ha, &r_ha);
+            sum_weighted_r = point_add(builder, &sum_weighted_r, &weighted_r)?;
         }
     }
     
-    // Verify that combined_s_g = combined_r_ha
-    let x_equal = builder.is_equal(combined_s_g.x, combined_r_ha.x);
-    let y_equal = builder.is_equal(combined_s_g.y, combined_r_ha.y);
+    // Compute sum(weight_i * h_i * A_i)
+    let mut sum_weighted_h_a = PointTarget {
+        x: builder.zero(),
+        y: builder.zero(),
+    };
+    is_first = true;
     
-    // Both x and y must be equal for the points to be equal
-    let points_equal_bool = builder.and(x_equal, y_equal);
-    let one = builder.one();
+    for i in 0..messages.len() {
+        // Compute h = H(R, A, M)
+        let mut hash_inputs = Vec::new();
+        hash_inputs.push(signatures[i].r_point.x);
+        hash_inputs.push(signatures[i].r_point.y);
+        hash_inputs.push(public_keys[i].point.x);
+        hash_inputs.push(public_keys[i].point.y);
+        hash_inputs.push(messages_hash[i]);
+        
+        let h = crate::gadgets::hash::hash_for_signature(builder, &hash_inputs)?;
+        
+        // Compute weighted_h = weight_i * h
+        let weighted_h = builder.mul(weights[i], h);
+        
+        // Compute weighted_h * A_i
+        let weighted_h_a = scalar_mul(builder, weighted_h, &public_keys[i].point)?;
+        
+        // Add it to the sum
+        if is_first {
+            sum_weighted_h_a = weighted_h_a;
+            is_first = false;
+        } else {
+            sum_weighted_h_a = point_add(builder, &sum_weighted_h_a, &weighted_h_a)?;
+        }
+    }
+    
+    // Compute sum(weight_i * R_i) + sum(weight_i * h_i * A_i)
+    let right_side = point_add(builder, &sum_weighted_r, &sum_weighted_h_a)?;
+    
+    // Check if sum(weight_i * S_i) * B == sum(weight_i * R_i) + sum(weight_i * h_i * A_i)
+    let is_x_equal = builder.is_equal(sum_weighted_s_b.x, right_side.x);
+    let is_y_equal = builder.is_equal(sum_weighted_s_b.y, right_side.y);
+    
+    // Both x and y coordinates must be equal
+    let is_valid = builder.and(is_x_equal, is_y_equal);
+    
+    // Convert BoolTarget to Target (0 or 1)
     let zero = builder.zero();
-    let points_equal = builder.select(points_equal_bool, one, zero);
-    
-    // The batch is valid if all R points are on the curve AND the combined equation holds
-    builder.mul(all_on_curve, points_equal)
+    let one = builder.one();
+    Ok(builder.select(is_valid, one, zero))
+}
+
+/// Helper function to assert that a point is on the curve
+fn assert_is_on_curve<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    point: &PointTarget,
+) {
+    let is_valid = is_on_curve(builder, point);
+    builder.assert_one(is_valid);
+}
+
+/// Helper function to perform scalar multiplication with the base point
+fn scalar_mul_base_point<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    scalar: Target,
+) -> PointTarget {
+    let base_point = get_base_point(builder);
+    optimized_scalar_multiply(builder, scalar, &base_point)
+}
+
+/// Helper function to perform scalar multiplication
+fn scalar_mul<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    scalar: Target,
+    point: &PointTarget,
+) -> PointTarget {
+    optimized_scalar_multiply(builder, scalar, point)
 }
 
 /// Count the number of gates used in signature verification
 pub fn count_signature_verification_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+) -> WireResult<usize> {
+    let start_gates = builder.num_gates();
     
-    // Create virtual targets for the signature components
-    let r_x = builder.add_virtual_target();
-    let r_y = builder.add_virtual_target();
-    let s = builder.add_virtual_target();
+    // Create dummy inputs for signature verification
+    let message_len = 32;
+    let mut message = Vec::with_capacity(message_len);
+    for _ in 0..message_len {
+        message.push(builder.add_virtual_target());
+    }
     
-    let r_point = PointTarget { x: r_x, y: r_y };
-    let signature = SignatureTarget { r_point, s_scalar: s };
+    let signature = SignatureTarget {
+        r_point: PointTarget {
+            x: builder.add_virtual_target(),
+            y: builder.add_virtual_target(),
+        },
+        s_scalar: builder.add_virtual_target(),
+    };
     
-    // Create virtual targets for the public key
-    let pk_x = builder.add_virtual_target();
-    let pk_y = builder.add_virtual_target();
-    let pk_point = PointTarget { x: pk_x, y: pk_y };
-    let public_key = PublicKeyTarget { point: pk_point };
+    let public_key = PublicKeyTarget {
+        point: PointTarget {
+            x: builder.add_virtual_target(),
+            y: builder.add_virtual_target(),
+        },
+    };
     
-    // Create a virtual target for the message hash
-    let msg_hash = builder.add_virtual_target();
+    // Run signature verification
+    let _ = verify_message_signature(builder, &message, &signature, &public_key)?;
     
-    // Verify the signature
-    verify_eddsa_signature(builder, &signature, msg_hash, &public_key);
-    
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    let end_gates = builder.num_gates();
+    Ok(end_gates - start_gates)
 }
 
 /// Count the number of gates used in batch signature verification
 pub fn count_batch_signature_verification_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     batch_size: usize,
-) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+) -> WireResult<usize> {
+    // Validate input
+    if batch_size == 0 {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Batch size must be greater than zero".to_string()
+        )));
+    }
     
-    // Create virtual targets for the signatures, message hashes, and public keys
+    if batch_size > 256 {
+        return Err(WireError::CryptoError(CryptoError::SignatureError(
+            "Batch size too large for gate counting".to_string()
+        )));
+    }
+    
+    let start_gates = builder.num_gates();
+    
+    // Create dummy inputs for batch signature verification
+    let message_len = 32;
+    let mut messages = Vec::with_capacity(batch_size);
     let mut signatures = Vec::with_capacity(batch_size);
-    let mut message_hashes = Vec::with_capacity(batch_size);
     let mut public_keys = Vec::with_capacity(batch_size);
     
     for _ in 0..batch_size {
-        let r_x = builder.add_virtual_target();
-        let r_y = builder.add_virtual_target();
-        let s = builder.add_virtual_target();
+        let mut message = Vec::with_capacity(message_len);
+        for _ in 0..message_len {
+            message.push(builder.add_virtual_target());
+        }
+        messages.push(message);
         
-        let r_point = PointTarget { x: r_x, y: r_y };
-        let signature = SignatureTarget { r_point, s_scalar: s };
+        let signature = SignatureTarget {
+            r_point: PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
         signatures.push(signature);
         
-        let pk_x = builder.add_virtual_target();
-        let pk_y = builder.add_virtual_target();
-        let pk_point = PointTarget { x: pk_x, y: pk_y };
-        let public_key = PublicKeyTarget { point: pk_point };
+        let public_key = PublicKeyTarget {
+            point: PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
         public_keys.push(public_key);
-        
-        let msg_hash = builder.add_virtual_target();
-        message_hashes.push(msg_hash);
     }
     
-    // Verify the batch of signatures
-    batch_verify_signatures(builder, &signatures, &message_hashes, &public_keys);
+    // Run batch signature verification
+    let _ = batch_verify_signatures(builder, &messages, &signatures, &public_keys)?;
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    let end_gates = builder.num_gates();
+    Ok(end_gates - start_gates)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::Field;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
-    use crate::core::PointTarget;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;
@@ -300,10 +379,9 @@ mod tests {
     
     #[test]
     fn test_verify_signature_valid() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
+        // Create a valid signature scenario
         // Create a message
         let message: Vec<Target> = (0..4).map(|_| builder.add_virtual_target()).collect();
         
@@ -325,25 +403,24 @@ mod tests {
         };
         
         // Verify the signature
-        let is_valid = verify_message_signature(&mut builder, &message, &sig, &pk);
+        let is_valid = verify_message_signature(&mut builder, &message, &sig, &pk)
+            .expect("Signature verification should not fail");
         
-        // Make the result a public input
-        builder.register_public_input(is_valid);
+        // The signature should be valid (1)
+        builder.assert_one(is_valid);
         
-        // Build the circuit
-        let circuit = builder.build::<C>();
+        let pw = builder.build::<C>();
+        let proof = pw.prove(Default::default()).expect("Proving should not fail");
         
-        // Just verify that the circuit was created successfully
-        // Skip proof generation and verification for now
-        assert!(circuit.common.gates.len() > 0, "Circuit should have gates");
+        let is_valid = pw.verify(proof).expect("Verification should not fail");
+        assert!(is_valid);
     }
-
+    
     #[test]
     fn test_verify_signature_invalid() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
+        // Create an invalid signature scenario
         // Create a message - use a smaller message to reduce complexity
         let message: Vec<Target> = (0..4).map(|_| builder.add_virtual_target()).collect();
         
@@ -365,16 +442,68 @@ mod tests {
         };
         
         // Verify the signature
-        let is_valid = verify_message_signature(&mut builder, &message, &sig, &pk);
+        let is_valid = verify_message_signature(&mut builder, &message, &sig, &pk)
+            .expect("Signature verification should not fail");
         
-        // Make the result a public input
-        builder.register_public_input(is_valid);
+        // The signature should be invalid (0)
+        builder.assert_zero(is_valid);
         
-        // Build the circuit
-        let circuit = builder.build::<C>();
+        let pw = builder.build::<C>();
+        let proof = pw.prove(Default::default()).expect("Proving should not fail");
         
-        // Just verify that the circuit was created successfully
-        // Skip proof generation and verification for now
-        assert!(circuit.common.gates.len() > 0, "Circuit should have gates");
+        let is_valid = pw.verify(proof).expect("Verification should not fail");
+        assert!(is_valid);
+    }
+    
+    #[test]
+    fn test_empty_message_error() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+        
+        // Create an empty message
+        let message = Vec::new();
+        
+        // Create dummy signature and public key
+        let signature = SignatureTarget {
+            r_point: PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
+        
+        let public_key = PublicKeyTarget {
+            point: PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
+        
+        // Verify the signature - should return an error
+        let result = verify_message_signature(&mut builder, &message, &signature, &public_key);
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::SignatureError(msg))) = result {
+            assert!(msg.contains("Empty message"));
+        } else {
+            panic!("Expected SignatureError");
+        }
+    }
+    
+    #[test]
+    fn test_batch_size_validation() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+        
+        // Create oversized batch
+        let batch_size = 300; // Over the 256 limit
+        
+        // Test the gate counting function with oversized batch
+        let result = count_batch_signature_verification_gates(&mut builder, batch_size);
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::SignatureError(msg))) = result {
+            assert!(msg.contains("Batch size too large"));
+        } else {
+            panic!("Expected SignatureError");
+        }
     }
 }

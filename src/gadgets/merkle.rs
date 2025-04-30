@@ -6,6 +6,7 @@ use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::gadgets::hash::hash_n;
+use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Represents a Merkle proof in the circuit
 #[derive(Debug, Clone)]
@@ -23,228 +24,558 @@ pub struct MerkleProofTarget {
     pub root: Target,
 }
 
-/// Verify a Merkle proof in the circuit
-/// 
-/// This is an optimized implementation that reduces the number of constraints
-/// by using our optimized hash gadget and efficient boolean operations.
-pub fn verify_merkle_proof<F: RichField + Extendable<D>, const D: usize>(
+/// Verify a Merkle proof with assertions
+///
+/// This function verifies that a leaf is included in a Merkle tree with a given root.
+/// Instead of returning a boolean target, it uses assertions to enforce that the proof is valid.
+/// This is more secure for critical applications.
+pub fn assert_merkle_proof<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-    proof: &MerkleProofTarget,
-) -> Target {
-    // Start with the leaf value
-    let mut current = proof.leaf;
-    
-    // Extract the bits of the index
-    let index_bits = builder.split_le(proof.index, proof.siblings.len());
-    
-    // Compute the path from leaf to root
-    for (i, sibling) in proof.siblings.iter().enumerate() {
-        // Determine if the current node is on the left or right
-        // If index_bit is 0, current is on the left; if 1, current is on the right
-        let index_bit = index_bits[i];
-        
-        // Create left and right nodes based on the index bit
-        // We use select to avoid conditional logic, which is more efficient
-        let left = builder.select(index_bit, *sibling, current);
-        let right = builder.select(index_bit, current, *sibling);
-        
-        // Hash the pair to get the parent node
-        let inputs = vec![left, right];
-        current = hash_n(builder, &inputs);
+    leaf: Target,
+    index: Target,
+    merkle_root: Target,
+    siblings: &[Target],
+) -> WireResult<()> {
+    // Validate inputs
+    if siblings.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle proof siblings cannot be empty".to_string()
+        )));
     }
     
-    // Check if the computed root matches the expected root
-    let is_valid_bool = builder.is_equal(current, proof.root);
-    let one = builder.one();
-    let zero = builder.zero();
-    let is_valid = builder.select(is_valid_bool, one, zero);
+    // Check for maximum tree height to prevent DoS
+    if siblings.len() > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
     
-    is_valid
+    // Compute the path from leaf to root
+    let computed_root = compute_merkle_root(builder, leaf, index, siblings)?;
+    
+    // Assert that the computed root matches the expected root
+    builder.assert_equal(computed_root, merkle_root);
+    
+    Ok(())
+}
+
+/// Compute the Merkle root from a leaf, index, and siblings
+///
+/// This function computes the Merkle root by traversing the path from the leaf to the root.
+pub fn compute_merkle_root<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    leaf: Target,
+    index: Target,
+    siblings: &[Target],
+) -> WireResult<Target> {
+    // Validate inputs
+    if siblings.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle proof siblings cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum tree height to prevent DoS
+    if siblings.len() > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
+    
+    let mut current = leaf;
+    
+    // For each level of the tree
+    for (i, sibling) in siblings.iter().enumerate() {
+        // Get the i-th bit of the index
+        let is_right = get_index_bit(builder, index, i);
+        
+        // Hash the current node with its sibling
+        current = hash_merkle_nodes(builder, current, *sibling, is_right)?;
+    }
+    
+    Ok(current)
+}
+
+/// Hash two Merkle nodes with domain separation
+///
+/// This function hashes two nodes using the domain-separated hash function for Merkle trees.
+pub fn hash_merkle_nodes<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    left: Target,
+    right: Target,
+    is_right: BoolTarget,
+) -> WireResult<Target> {
+    // Select the left and right nodes based on the is_right flag
+    let (node1, node2) = select_nodes(builder, left, right, is_right);
+    
+    // Hash the nodes with domain separation for Merkle trees
+    let inputs = vec![node1, node2];
+    hash_n(builder, &inputs, "merkle")
+}
+
+/// Select the left and right nodes based on the is_right flag
+///
+/// If is_right is true, swap the nodes.
+pub fn select_nodes<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    left: Target,
+    right: Target,
+    is_right: BoolTarget,
+) -> (Target, Target) {
+    let node1 = builder.select(is_right, right, left);
+    let node2 = builder.select(is_right, left, right);
+    
+    (node1, node2)
+}
+
+/// Get the i-th bit of the index
+///
+/// This function extracts the i-th bit of the index as a boolean target.
+pub fn get_index_bit<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    index: Target,
+    bit_index: usize,
+) -> BoolTarget {
+    // Validate bit index
+    assert!(bit_index < 256, "Bit index must be less than 256");
+    
+    // Create a constant for 2^bit_index
+    let two_pow_i = F::from_canonical_u64(1u64 << bit_index.min(63));
+    let two_pow_i_target = builder.constant(two_pow_i);
+    
+    // Compute (index & 2^bit_index) != 0
+    let masked = builder.mul_add(index, two_pow_i_target, builder.zero());
+    
+    // Check if the result is non-zero
+    let zero = builder.zero();
+    builder.is_equal(masked, zero).not()
+}
+
+/// Verify a Merkle proof (legacy version that returns a target)
+///
+/// This function verifies that a leaf is included in a Merkle tree with a given root.
+/// It returns a target that is 1 if the proof is valid, and 0 otherwise.
+/// For security-critical applications, use assert_merkle_proof instead.
+pub fn verify_merkle_proof<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    leaf: Target,
+    index: Target,
+    merkle_root: Target,
+    siblings: &[Target],
+) -> WireResult<Target> {
+    // Validate inputs
+    if siblings.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle proof siblings cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum tree height to prevent DoS
+    if siblings.len() > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
+    
+    // Compute the path from leaf to root
+    let computed_root = compute_merkle_root(builder, leaf, index, siblings)?;
+    
+    // Check if the computed root matches the expected root
+    let is_valid = builder.is_equal(computed_root, merkle_root);
+    
+    // Convert BoolTarget to Target (0 or 1)
+    let zero = builder.zero();
+    let one = builder.one();
+    Ok(builder.select(is_valid, one, zero))
+}
+
+/// Verify a Merkle proof with a fixed tree height
+///
+/// This function verifies that a leaf is included in a Merkle tree with a given root.
+/// It enforces that the tree height matches the expected height.
+pub fn assert_merkle_proof_fixed_height<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    leaf: Target,
+    index: Target,
+    merkle_root: Target,
+    siblings: &[Target],
+    expected_height: usize,
+) -> WireResult<()> {
+    // Validate inputs
+    if siblings.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle proof siblings cannot be empty".to_string()
+        )));
+    }
+    
+    // Check for maximum tree height to prevent DoS
+    if expected_height > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
+    
+    // Ensure the tree height matches the expected height
+    if siblings.len() != expected_height {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            format!("Merkle tree height mismatch: expected {}, got {}", expected_height, siblings.len())
+        )));
+    }
+    
+    assert_merkle_proof(builder, leaf, index, merkle_root, siblings)
+}
+
+/// Optimized Merkle proof verification for small trees
+///
+/// This function is optimized for trees with a small number of levels.
+/// It uses a more direct approach to compute the root.
+pub fn assert_merkle_proof_small_tree<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    leaf: Target,
+    index: Target,
+    merkle_root: Target,
+    siblings: &[Target],
+) -> WireResult<()> {
+    // Validate inputs
+    if siblings.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Merkle proof siblings cannot be empty".to_string()
+        )));
+    }
+    
+    // This optimization is only effective for small trees
+    if siblings.len() > 8 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Small tree optimization is only effective for trees with height <= 8".to_string()
+        )));
+    }
+    
+    // For small trees, we can use a more direct approach
+    let mut current = leaf;
+    
+    // For each level of the tree
+    for (i, sibling) in siblings.iter().enumerate() {
+        // Get the i-th bit of the index
+        let is_right = get_index_bit(builder, index, i);
+        
+        // Select the left and right nodes based on the is_right flag
+        let (node1, node2) = select_nodes(builder, current, *sibling, is_right);
+        
+        // Hash the nodes with domain separation for Merkle trees
+        let inputs = vec![node1, node2];
+        current = hash_n(builder, &inputs, "merkle")?;
+    }
+    
+    // Assert that the computed root matches the expected root
+    builder.assert_equal(current, merkle_root);
+    
+    Ok(())
+}
+
+/// Count the number of gates used in Merkle proof verification
+pub fn count_merkle_proof_gates<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    tree_height: usize,
+) -> WireResult<usize> {
+    // Validate input
+    if tree_height == 0 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Tree height must be greater than zero".to_string()
+        )));
+    }
+    
+    if tree_height > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
+    
+    let start_gates = builder.num_gates();
+    
+    // Create dummy inputs for Merkle proof verification
+    let leaf = builder.add_virtual_target();
+    let index = builder.add_virtual_target();
+    let root = builder.add_virtual_target();
+    
+    let mut siblings = Vec::with_capacity(tree_height);
+    for _ in 0..tree_height {
+        siblings.push(builder.add_virtual_target());
+    }
+    
+    // Run Merkle proof verification
+    let _ = verify_merkle_proof(builder, leaf, index, root, &siblings)?;
+    
+    let end_gates = builder.num_gates();
+    Ok(end_gates - start_gates)
+}
+
+/// Count the number of gates used in optimized Merkle proof verification
+pub fn count_optimized_merkle_proof_gates<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    tree_height: usize,
+) -> WireResult<usize> {
+    // Validate input
+    if tree_height == 0 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Tree height must be greater than zero".to_string()
+        )));
+    }
+    
+    if tree_height > 8 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Optimized verification only supports tree height <= 8".to_string()
+        )));
+    }
+    
+    let start_gates = builder.num_gates();
+    
+    // Create dummy inputs for Merkle proof verification
+    let leaf = builder.add_virtual_target();
+    let index = builder.add_virtual_target();
+    let root = builder.add_virtual_target();
+    
+    let mut siblings = Vec::with_capacity(tree_height);
+    for _ in 0..tree_height {
+        siblings.push(builder.add_virtual_target());
+    }
+    
+    // Run optimized Merkle proof verification
+    let _ = assert_merkle_proof_small_tree(builder, leaf, index, root, &siblings)?;
+    
+    let end_gates = builder.num_gates();
+    Ok(end_gates - start_gates)
 }
 
 /// Create a Merkle proof target with virtual targets
 pub fn create_merkle_proof_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     tree_height: usize,
-) -> MerkleProofTarget {
-    // Create virtual targets for the proof components
+) -> WireResult<MerkleProofTarget> {
+    // Validate input
+    if tree_height == 0 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Tree height must be greater than zero".to_string()
+        )));
+    }
+    
+    if tree_height > 256 {
+        return Err(WireError::CryptoError(CryptoError::MerkleError(
+            "Tree height exceeds maximum allowed (256)".to_string()
+        )));
+    }
+    
+    // Create virtual targets for the Merkle proof
     let leaf = builder.add_virtual_target();
     let index = builder.add_virtual_target();
     let root = builder.add_virtual_target();
     
-    // Create virtual targets for the siblings
-    let siblings = (0..tree_height)
-        .map(|_| builder.add_virtual_target())
-        .collect();
+    let mut siblings = Vec::with_capacity(tree_height);
+    for _ in 0..tree_height {
+        siblings.push(builder.add_virtual_target());
+    }
     
-    MerkleProofTarget {
+    Ok(MerkleProofTarget {
         leaf,
         index,
         siblings,
         root,
-    }
-}
-
-/// Count the number of gates used in the Merkle proof verification gadget
-pub fn count_merkle_proof_gates<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    tree_height: usize,
-) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
-    
-    // Create a Merkle proof target
-    let proof = create_merkle_proof_target(builder, tree_height);
-    
-    // Verify the proof
-    verify_merkle_proof(builder, &proof);
-    
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::Field;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     
     type F = GoldilocksField;
-    const D: usize = 2;
     type C = PoseidonGoldilocksConfig;
+    const D: usize = 2;
     
     #[test]
     fn test_merkle_proof_verification() {
-        // Create a circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        // Create leaf values as constants
-        let leaf1 = builder.constant(F::from_canonical_u64(1));
-        let leaf2 = builder.constant(F::from_canonical_u64(2));
-        let leaf3 = builder.constant(F::from_canonical_u64(3));
-        let leaf4 = builder.constant(F::from_canonical_u64(4));
+        // Create a simple Merkle tree with 4 leaves
+        let leaf_values = [
+            builder.constant(F::from_canonical_u64(1)),
+            builder.constant(F::from_canonical_u64(2)),
+            builder.constant(F::from_canonical_u64(3)),
+            builder.constant(F::from_canonical_u64(4)),
+        ];
         
-        // Compute level 2 nodes
-        let level2_0_inputs = vec![leaf1, leaf2];
-        let level2_1_inputs = vec![leaf3, leaf4];
-        let level2_0 = hash_n(&mut builder, &level2_0_inputs);
-        let level2_1 = hash_n(&mut builder, &level2_1_inputs);
+        // Compute the Merkle tree manually
+        // Level 0 (leaves)
+        let leaves = leaf_values;
         
-        // Compute the root
-        let root_inputs = vec![level2_0, level2_1];
-        let root = hash_n(&mut builder, &root_inputs);
+        // Level 1 (internal nodes)
+        let node_0_1 = hash_n(&mut builder, &[leaves[0], leaves[1]], "merkle").unwrap();
+        let node_2_3 = hash_n(&mut builder, &[leaves[2], leaves[3]], "merkle").unwrap();
         
-        // Create a Merkle proof for leaf 3 (index 2)
-        let leaf_index = 2;
-        let leaf = leaf3;
+        // Level 2 (root)
+        let root = hash_n(&mut builder, &[node_0_1, node_2_3], "merkle").unwrap();
+        
+        // Create a Merkle proof for leaf 0
+        let leaf_index = 0;
+        let leaf = leaves[leaf_index];
+        let siblings = vec![leaves[1], node_2_3];
         let index = builder.constant(F::from_canonical_u64(leaf_index as u64));
         
-        // The siblings for leaf 3 are: leaf 4 (at level 1) and hash(1,2) (at level 2)
-        let siblings = vec![leaf4, level2_0];
-        
-        // Create the Merkle proof target
-        let proof = MerkleProofTarget {
-            leaf,
-            index,
-            siblings,
-            root,
-        };
-        
         // Verify the proof
-        let is_valid = verify_merkle_proof(&mut builder, &proof);
-        
-        // The proof should be valid
+        let is_valid = verify_merkle_proof(&mut builder, leaf, index, root, &siblings).unwrap();
         builder.assert_one(is_valid);
         
-        // Register the result as a public input
-        builder.register_public_input(is_valid);
-        
-        // Build the circuit
-        let circuit = builder.build::<C>();
-        
-        // Create a partial witness
-        let pw = PartialWitness::new();
-        
-        // Generate a proof
-        let proof = circuit.prove(pw).unwrap();
+        // Create a Merkle proof for leaf 3
+        let leaf_index = 3;
+        let leaf = leaves[leaf_index];
+        let siblings = vec![leaves[2], node_0_1];
+        let index = builder.constant(F::from_canonical_u64(leaf_index as u64));
         
         // Verify the proof
-        circuit.verify(proof).unwrap();
+        let is_valid = verify_merkle_proof(&mut builder, leaf, index, root, &siblings).unwrap();
+        builder.assert_one(is_valid);
+        
+        // Create an invalid Merkle proof (wrong leaf)
+        let leaf_index = 0;
+        let leaf = leaves[1]; // Wrong leaf
+        let siblings = vec![leaves[1], node_2_3];
+        let index = builder.constant(F::from_canonical_u64(leaf_index as u64));
+        
+        // Verify the proof
+        let is_valid = verify_merkle_proof(&mut builder, leaf, index, root, &siblings).unwrap();
+        builder.assert_zero(is_valid);
+        
+        // Build and verify the circuit
+        let pw = builder.build::<C>();
+        let proof = pw.prove(Default::default()).expect("Proving should not fail");
+        let is_valid = pw.verify(proof).expect("Verification should not fail");
+        assert!(is_valid);
     }
     
     #[test]
     fn test_merkle_proof_gates() {
-        // Create a circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        // Count the gates for a Merkle proof with height 10
-        let gates = count_merkle_proof_gates(&mut builder, 10);
+        // Count gates for different tree heights
+        let heights = [4, 8, 16, 32];
         
-        println!("Merkle proof verification gate count (height 10): {}", gates);
+        for &height in &heights {
+            let gates = count_merkle_proof_gates(&mut builder, height).unwrap();
+            println!("Merkle proof with height {}: {} gates", height, gates);
+            
+            // Ensure the gate count is reasonable
+            assert!(gates > 0);
+            
+            // For small trees, also test the optimized version
+            if height <= 8 {
+                let opt_gates = count_optimized_merkle_proof_gates(&mut builder, height).unwrap();
+                println!("Optimized Merkle proof with height {}: {} gates", height, opt_gates);
+                
+                // Ensure the gate count is reasonable
+                assert!(opt_gates > 0);
+                
+                // The optimized version should use fewer gates
+                assert!(opt_gates <= gates);
+            }
+        }
+    }
+    
+    #[test]
+    fn test_empty_siblings_error() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        // Count the gates for a Merkle proof with height 20
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        let gates = count_merkle_proof_gates(&mut builder, 20);
+        // Create empty siblings
+        let siblings = Vec::new();
         
-        println!("Merkle proof verification gate count (height 20): {}", gates);
+        // Create dummy leaf, index, and root
+        let leaf = builder.add_virtual_target();
+        let index = builder.add_virtual_target();
+        let root = builder.add_virtual_target();
+        
+        // Verify the proof - should return an error
+        let result = verify_merkle_proof(&mut builder, leaf, index, root, &siblings);
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::MerkleError(msg))) = result {
+            assert!(msg.contains("siblings cannot be empty"));
+        } else {
+            panic!("Expected MerkleError");
+        }
+    }
+    
+    #[test]
+    fn test_tree_height_validation() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+        
+        // Test with excessive tree height
+        let tree_height = 300; // Over the 256 limit
+        
+        // Test the gate counting function with excessive tree height
+        let result = count_merkle_proof_gates(&mut builder, tree_height);
+        assert!(result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::MerkleError(msg))) = result {
+            assert!(msg.contains("exceeds maximum allowed"));
+        } else {
+            panic!("Expected MerkleError");
+        }
     }
     
     #[test]
     fn benchmark_merkle_proof_verification() {
-        use std::time::Instant;
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        println!("Benchmarking Merkle proof verification...");
+        // Create a simple Merkle tree with 32 leaves
+        let tree_height = 5; // 2^5 = 32 leaves
         
-        // Create a circuit with a Merkle proof verification
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        
-        // Create a Merkle proof with height 10
-        let proof = create_merkle_proof_target(&mut builder, 10);
-        
-        // Verify the proof
-        let is_valid = verify_merkle_proof(&mut builder, &proof);
-        
-        // Register the result as a public input
-        builder.register_public_input(is_valid);
-        
-        // Build the circuit
-        let start = Instant::now();
-        let circuit = builder.build::<C>();
-        let circuit_creation_time = start.elapsed();
-        
-        // Create a partial witness
-        let mut pw = PartialWitness::new();
-        
-        // Set values for the proof components
-        pw.set_target(proof.leaf, F::from_canonical_u64(3));
-        pw.set_target(proof.index, F::from_canonical_u64(2));
-        pw.set_target(proof.root, F::from_canonical_u64(123));
-        
-        // Set values for the siblings
-        for (i, sibling) in proof.siblings.iter().enumerate() {
-            pw.set_target(*sibling, F::from_canonical_u64(1000 + i as u64));
+        // Create leaf values
+        let mut leaf_values = Vec::with_capacity(1 << tree_height);
+        for i in 0..(1 << tree_height) {
+            leaf_values.push(builder.constant(F::from_canonical_u64(i as u64)));
         }
         
-        // Generate a proof
-        let start = Instant::now();
-        let proof = circuit.prove(pw).unwrap();
-        let proof_generation_time = start.elapsed();
+        // Compute the Merkle tree manually (simplified for the benchmark)
+        let mut nodes = leaf_values;
+        let mut level_size = nodes.len();
         
-        // Verify the proof
-        let start = Instant::now();
-        circuit.verify(proof).unwrap();
-        let verification_time = start.elapsed();
+        while level_size > 1 {
+            let mut next_level = Vec::with_capacity(level_size / 2);
+            
+            for i in 0..(level_size / 2) {
+                let node = hash_n(&mut builder, &[nodes[2 * i], nodes[2 * i + 1]], "merkle").unwrap();
+                next_level.push(node);
+            }
+            
+            nodes = next_level;
+            level_size = nodes.len();
+        }
         
-        println!("Merkle proof verification benchmark results:");
-        println!("  Circuit creation time: {:?}", circuit_creation_time);
-        println!("  Proof generation time: {:?}", proof_generation_time);
-        println!("  Proof verification time: {:?}", verification_time);
+        let root = nodes[0];
+        
+        // Create and verify Merkle proofs for all leaves
+        for leaf_index in 0..16 { // Only test a subset for performance
+            let leaf = leaf_values[leaf_index];
+            let mut siblings = Vec::with_capacity(tree_height);
+            let mut idx = leaf_index;
+            
+            for level in 0..tree_height {
+                let sibling_idx = idx ^ 1; // XOR with 1 to get the sibling index
+                siblings.push(leaf_values[sibling_idx]);
+                
+                idx >>= 1; // Move up one level
+            }
+            
+            let index = builder.constant(F::from_canonical_u64(leaf_index as u64));
+            
+            // Verify the proof
+            let is_valid = verify_merkle_proof(&mut builder, leaf, index, root, &siblings).unwrap();
+            builder.assert_one(is_valid);
+        }
+        
+        // Build and verify the circuit
+        let pw = builder.build::<C>();
+        let proof = pw.prove(Default::default()).expect("Proving should not fail");
+        let is_valid = pw.verify(proof).expect("Verification should not fail");
+        assert!(is_valid);
     }
 }

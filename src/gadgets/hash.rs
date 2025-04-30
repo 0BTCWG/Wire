@@ -7,15 +7,30 @@ use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::UTXOTarget;
+use crate::errors::{WireError, CryptoError, WireResult};
 
-/// Hash a list of targets using Poseidon hash
+// Domain separators for different hash usages
+// These constants ensure that hashes for different purposes cannot collide
+const DOMAIN_GENERIC: u64 = 1;
+const DOMAIN_UTXO: u64 = 2;
+const DOMAIN_NULLIFIER: u64 = 3;
+const DOMAIN_SIGNATURE: u64 = 4;
+const DOMAIN_MERKLE: u64 = 5;
+const DOMAIN_ASSET_ID: u64 = 6;
+
+/// Hash a list of targets using Poseidon hash with domain separation
 /// This is the original implementation, kept for backward compatibility
 pub fn hash_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     inputs: &[Target],
 ) -> HashOutTarget {
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    let mut domain_inputs = vec![domain_separator];
+    domain_inputs.extend_from_slice(inputs);
+    
     // Use Plonky2's built-in Poseidon hash
-    builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs.to_vec())
+    builder.hash_n_to_hash_no_pad::<PoseidonHash>(domain_inputs)
 }
 
 /// Get the first element of a hash output
@@ -31,10 +46,15 @@ pub fn hash_single<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     value: Target,
 ) -> Target {
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    
     // Use the builder's hash_n_to_hash_no_pad method for single value hashing
-    // This is more efficient than creating an array and using the builder's hash method
-    let hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![value]);
-    hash.elements[0]
+    let inputs = vec![domain_separator, value];
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
 }
 
 /// Optimized Poseidon hash gadget for multiple field elements
@@ -43,10 +63,23 @@ pub fn hash_n<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     values: &[Target],
 ) -> Target {
-    // Use the builder's hash_n_to_hash_no_pad method directly
-    // This is more efficient than the previous implementation
-    let hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(values.to_vec());
-    hash.elements[0]
+    if values.is_empty() {
+        // For empty inputs, use only the domain separator
+        let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+        let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![domain_separator]);
+        return hash_out.elements[0];
+    }
+    
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    let mut inputs = vec![domain_separator];
+    inputs.extend_from_slice(values);
+    
+    // Use the builder's hash_n_to_hash_no_pad method
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
 }
 
 /// Optimized Poseidon hash gadget with reduced rounds
@@ -56,27 +89,30 @@ pub fn optimized_hash<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     values: &[Target],
 ) -> Target {
-    // For small input sizes, we can use a more efficient approach
-    match values.len() {
-        0 => {
-            // For empty input, return a constant hash value
-            builder.constant(F::from_canonical_u64(0))
-        }
-        1 => {
-            // For single value, use the optimized single hash function
-            optimized_hash_single(builder, values[0])
-        }
-        2 => {
-            // For two values, use a specialized two-input hash
-            optimized_hash_pair(builder, values[0], values[1])
-        }
-        _ => {
-            // For larger inputs, use the standard hash function
-            // but with optimized parameters
-            let hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(values.to_vec());
-            hash.elements[0]
-        }
+    if values.is_empty() {
+        return hash_empty_input(builder);
     }
+    
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    let mut inputs = vec![domain_separator];
+    inputs.extend_from_slice(values);
+    
+    // Use the builder's hash_n_to_hash_no_pad method
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
+}
+
+/// Hash an empty input with domain separation
+fn hash_empty_input<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+) -> Target {
+    // For empty inputs, use only the domain separator
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![domain_separator]);
+    hash_out.elements[0]
 }
 
 /// Optimized Poseidon hash gadget for a single field element with reduced rounds
@@ -84,10 +120,15 @@ pub fn optimized_hash_single<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     value: Target,
 ) -> Target {
-    // For a single input, we can use a more direct approach
-    // that avoids unnecessary operations
-    let hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![value]);
-    hash.elements[0]
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    
+    // Use the builder's hash_n_to_hash_no_pad method for single value hashing
+    let inputs = vec![domain_separator, value];
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
 }
 
 /// Optimized Poseidon hash gadget for two field elements with reduced rounds
@@ -96,9 +137,15 @@ pub fn optimized_hash_pair<F: RichField + Extendable<D>, const D: usize>(
     value1: Target,
     value2: Target,
 ) -> Target {
-    // For two inputs, we can use a more direct approach
-    let hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![value1, value2]);
-    hash.elements[0]
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    
+    // Use the builder's hash_n_to_hash_no_pad method for pair value hashing
+    let inputs = vec![domain_separator, value1, value2];
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
 }
 
 /// Optimized UTXO hash function that reduces the number of constraints
@@ -107,51 +154,54 @@ pub fn optimized_hash_utxo<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     utxo: &UTXOTarget,
 ) -> Target {
-    // Instead of concatenating all fields and then hashing,
-    // we can use a more structured approach that reduces the input size
+    // Validate UTXO components
+    if utxo.owner_pubkey_hash_target.is_empty() {
+        // This should never happen in a properly constructed circuit
+        // But we handle it gracefully for robustness
+        return hash_empty_input(builder);
+    }
     
-    // First, hash the owner public key hash
-    let owner_hash = if utxo.owner_pubkey_hash_target.len() > 1 {
-        let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonHash>(
-            utxo.owner_pubkey_hash_target.to_vec()
-        );
-        hash_result.elements[0]
-    } else if utxo.owner_pubkey_hash_target.len() == 1 {
-        utxo.owner_pubkey_hash_target[0]
-    } else {
-        builder.constant(F::from_canonical_u64(0))
-    };
+    // Add domain separator for UTXO hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_UTXO));
     
-    // Next, hash the asset ID
-    let asset_hash = if utxo.asset_id_target.len() > 1 {
-        let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonHash>(
-            utxo.asset_id_target.to_vec()
-        );
-        hash_result.elements[0]
-    } else if utxo.asset_id_target.len() == 1 {
-        utxo.asset_id_target[0]
-    } else {
-        builder.constant(F::from_canonical_u64(0))
-    };
+    // Combine owner pubkey hash into a single field element
+    let mut combined_owner = domain_separator;
+    for &target in &utxo.owner_pubkey_hash_target {
+        // Combine using field addition and multiplication for efficiency
+        // This is a simple combining function that avoids expensive hash operations
+        let temp = builder.mul(combined_owner, target);
+        combined_owner = builder.add(temp, target);
+    }
     
-    // Finally, hash the combined components with amount and salt
-    let salt_hash = if utxo.salt_target.len() > 1 {
-        let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonHash>(
-            utxo.salt_target.to_vec()
-        );
-        hash_result.elements[0]
-    } else if utxo.salt_target.len() == 1 {
-        utxo.salt_target[0]
-    } else {
-        builder.constant(F::from_canonical_u64(0))
-    };
+    // Combine asset ID into a single field element
+    let mut combined_asset_id = domain_separator;
+    for &target in &utxo.asset_id_target {
+        // Combine using field addition and multiplication for efficiency
+        let temp = builder.mul(combined_asset_id, target);
+        combined_asset_id = builder.add(temp, target);
+    }
     
-    // Combine the hashed components with the amount
-    let final_hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(
-        vec![owner_hash, asset_hash, utxo.amount_target, salt_hash]
-    );
+    // Combine salt into a single field element
+    let mut combined_salt = domain_separator;
+    for &target in &utxo.salt_target {
+        // Combine using field addition and multiplication for efficiency
+        let temp = builder.mul(combined_salt, target);
+        combined_salt = builder.add(temp, target);
+    }
     
-    final_hash.elements[0]
+    // Final hash combining all components
+    let inputs = vec![
+        domain_separator,
+        combined_owner,
+        combined_asset_id,
+        utxo.amount_target,
+        combined_salt,
+    ];
+    
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    hash_out.elements[0]
 }
 
 /// Optimized Poseidon hash gadget for a variable number of field elements
@@ -159,20 +209,24 @@ pub fn optimized_hash_utxo<F: RichField + Extendable<D>, const D: usize>(
 pub fn hash<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     values: &[Target],
-) -> Target {
+) -> WireResult<Target> {
+    if values.is_empty() {
+        return Ok(hash_empty_input(builder));
+    }
+    
+    // Optimize for common cases
     match values.len() {
-        0 => {
-            // For empty input, return a constant hash value
-            // This avoids creating unnecessary constraints
-            builder.constant(F::from_canonical_u64(0))
-        }
-        1 => {
-            // For single value, use the optimized single hash function
-            hash_single(builder, values[0])
-        }
+        0 => Ok(hash_empty_input(builder)),
+        1 => Ok(optimized_hash_single(builder, values[0])),
+        2 => Ok(optimized_hash_pair(builder, values[0], values[1])),
         _ => {
-            // For multiple values, use the optimized multi-value hash function
-            hash_n(builder, values)
+            // For larger inputs, use the general hash_n function
+            if values.len() > 100 {
+                return Err(WireError::CryptoError(CryptoError::HashError(
+                    "Hash input too large (more than 100 elements)".to_string()
+                )));
+            }
+            Ok(hash_n(builder, values))
         }
     }
 }
@@ -190,19 +244,41 @@ pub fn hash_utxo_commitment<F: RichField + Extendable<D>, const D: usize>(
     asset_id: &[Target],
     amount: Target,
     salt: &[Target],
-) -> Vec<Target> {
-    // Concatenate all the inputs
-    let mut inputs = Vec::new();
+) -> WireResult<Vec<Target>> {
+    // Validate input lengths
+    if owner_pubkey_hash.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Owner pubkey hash cannot be empty".to_string()
+        )));
+    }
+    
+    if asset_id.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Asset ID cannot be empty".to_string()
+        )));
+    }
+    
+    if salt.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Salt cannot be empty".to_string()
+        )));
+    }
+    
+    // Add domain separator for UTXO hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_UTXO));
+    
+    // Combine all inputs
+    let mut inputs = vec![domain_separator];
     inputs.extend_from_slice(owner_pubkey_hash);
     inputs.extend_from_slice(asset_id);
     inputs.push(amount);
     inputs.extend_from_slice(salt);
     
-    // Hash the inputs
-    let hash_result = hash_targets(builder, &inputs);
+    // Hash the combined inputs
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
     
-    // Return the hash elements as a vector
-    hash_result.elements.to_vec()
+    // Return all elements of the hash output
+    Ok(hash_out.elements.to_vec())
 }
 
 /// Calculate an asset ID from creator public key and nonce
@@ -213,20 +289,33 @@ pub fn calculate_asset_id<F: RichField + Extendable<D>, const D: usize>(
     decimals: Target,
     max_supply: Target,
     is_mintable: Target,
-) -> Vec<Target> {
-    // Combine all fields into a single vector
-    let mut inputs = Vec::new();
+) -> WireResult<Vec<Target>> {
+    // Validate inputs
+    if creator_pubkey.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Creator public key cannot be empty".to_string()
+        )));
+    }
+    
+    // Add domain separator for asset ID calculation
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_ASSET_ID));
+    
+    // Convert is_mintable boolean to field element (0 or 1)
+    let is_mintable_field = bool_to_field(builder, is_mintable);
+    
+    // Combine all inputs
+    let mut inputs = vec![domain_separator];
     inputs.extend_from_slice(creator_pubkey);
     inputs.push(nonce);
     inputs.push(decimals);
     inputs.push(max_supply);
-    inputs.push(is_mintable);
+    inputs.push(is_mintable_field);
     
     // Hash the combined inputs
-    let hash_out = hash_targets(builder, &inputs);
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
     
-    // Convert the hash output to a vector of targets
-    hash_out.elements.to_vec()
+    // Return all elements of the hash output
+    Ok(hash_out.elements.to_vec())
 }
 
 /// Calculate the hash of a UTXO commitment using the optimized approach
@@ -234,24 +323,15 @@ pub fn calculate_asset_id<F: RichField + Extendable<D>, const D: usize>(
 pub fn hash_utxo_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     utxo: &UTXOTarget,
-) -> Target {
-    // Create a vector of targets to hash
-    let mut targets = Vec::new();
+) -> WireResult<Target> {
+    // Validate UTXO components
+    if utxo.owner_pubkey_hash_target.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Owner pubkey hash cannot be empty".to_string()
+        )));
+    }
     
-    // Add owner_pubkey_hash components
-    targets.extend_from_slice(&utxo.owner_pubkey_hash_target);
-    
-    // Add asset_id
-    targets.extend_from_slice(&utxo.asset_id_target);
-    
-    // Add amount
-    targets.push(utxo.amount_target);
-    
-    // Add salt
-    targets.extend_from_slice(&utxo.salt_target);
-    
-    // Hash all components together using the optimized hash function
-    optimized_hash(builder, &targets)
+    Ok(optimized_hash_utxo(builder, utxo))
 }
 
 /// Convert a boolean target to a field element target (0 or 1)
@@ -259,8 +339,6 @@ pub fn bool_to_field<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     b: BoolTarget,
 ) -> Target {
-    // Use the builder's select method to convert a boolean to a field element
-    // This is more efficient than creating a conditional and using it
     let zero = builder.zero();
     let one = builder.one();
     builder.select(b, one, zero)
@@ -272,44 +350,123 @@ pub fn hash_with_flags<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     values: &[Target],
     flags: &[BoolTarget],
-) -> Target {
-    assert_eq!(values.len(), flags.len(), "Values and flags must have the same length");
+) -> WireResult<Target> {
+    // Validate inputs
+    if values.len() != flags.len() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            format!("Number of values ({}) must match number of flags ({})", values.len(), flags.len())
+        )));
+    }
     
-    // Create a vector to store the selected values
-    let mut selected_values = Vec::new();
+    if values.is_empty() {
+        return Ok(hash_empty_input(builder));
+    }
+    
+    // Add domain separator for generic hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_GENERIC));
+    
+    // Create a vector to hold the selected inputs
+    let mut selected_inputs = vec![domain_separator];
     
     // For each value and flag pair
     for i in 0..values.len() {
-        // Convert the flag to a field element (0 or 1)
+        // If the flag is true, include the value
+        let zero = builder.zero();
+        let selected = builder.select(flags[i], values[i], zero);
+        
+        // Only add the value if the flag is true
+        // We use a trick: multiply the value by the flag (0 or 1)
+        // This way, if the flag is 0, the value becomes 0 and doesn't affect the hash
         let flag_as_field = bool_to_field(builder, flags[i]);
+        let masked_value = builder.mul(selected, flag_as_field);
         
-        // Multiply the value by the flag (0 or 1)
-        // This effectively includes or excludes the value based on the flag
-        let selected_value = builder.mul(values[i], flag_as_field);
-        
-        // Add the selected value to the vector
-        selected_values.push(selected_value);
+        selected_inputs.push(masked_value);
     }
     
-    // Hash the selected values using the optimized hash function
-    optimized_hash(builder, &selected_values)
+    // Hash the selected inputs
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(selected_inputs);
+    
+    // Return the first element of the hash output
+    Ok(hash_out.elements[0])
+}
+
+/// Hash for signature verification with domain separation
+pub fn hash_for_signature<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    values: &[Target],
+) -> WireResult<Target> {
+    if values.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Signature message cannot be empty".to_string()
+        )));
+    }
+    
+    // Add domain separator for signature hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_SIGNATURE));
+    let mut inputs = vec![domain_separator];
+    inputs.extend_from_slice(values);
+    
+    // Use the builder's hash_n_to_hash_no_pad method
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    Ok(hash_out.elements[0])
+}
+
+/// Hash for Merkle tree operations with domain separation
+pub fn hash_for_merkle<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    left: Target,
+    right: Target,
+) -> WireResult<Target> {
+    // Add domain separator for Merkle tree hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_MERKLE));
+    
+    // Use the builder's hash_n_to_hash_no_pad method for Merkle node hashing
+    let inputs = vec![domain_separator, left, right];
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    Ok(hash_out.elements[0])
+}
+
+/// Hash for nullifier generation with domain separation
+pub fn hash_for_nullifier<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    values: &[Target],
+) -> WireResult<Target> {
+    if values.is_empty() {
+        return Err(WireError::CryptoError(CryptoError::HashError(
+            "Nullifier input cannot be empty".to_string()
+        )));
+    }
+    
+    // Add domain separator for nullifier hash usage
+    let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_NULLIFIER));
+    let mut inputs = vec![domain_separator];
+    inputs.extend_from_slice(values);
+    
+    // Use the builder's hash_n_to_hash_no_pad method
+    let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(inputs);
+    
+    // Return the first element of the hash output
+    Ok(hash_out.elements[0])
 }
 
 /// Count the number of gates used in the hash gadget for a single input
 pub fn count_hash_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+    let start_gates = builder.num_gates();
     
-    // Create a target to hash
-    let target = builder.add_virtual_target();
+    // Create a dummy input
+    let dummy = builder.add_virtual_target();
     
-    // Perform the hash operation
-    hash_single(builder, target);
+    // Hash the dummy input
+    let _ = hash_single(builder, dummy);
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    // Return the number of gates used
+    builder.num_gates() - start_gates
 }
 
 /// Count the number of gates used in the hash gadget for multiple inputs
@@ -317,97 +474,93 @@ pub fn count_hash_n_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     n: usize,
 ) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+    let start_gates = builder.num_gates();
     
-    // Create targets to hash
-    let mut targets = Vec::with_capacity(n);
+    // Create dummy inputs
+    let mut dummies = Vec::with_capacity(n);
     for _ in 0..n {
-        targets.push(builder.add_virtual_target());
+        dummies.push(builder.add_virtual_target());
     }
     
-    // Perform the hash operation
-    hash_n(builder, &targets);
+    // Hash the dummy inputs
+    let _ = hash_n(builder, &dummies);
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    // Return the number of gates used
+    builder.num_gates() - start_gates
 }
 
 /// Count the number of gates used in the UTXO commitment hash
 pub fn count_utxo_hash_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+    let start_gates = builder.num_gates();
     
-    // Create virtual targets for the UTXO components
+    // Create dummy UTXO components
     let mut owner_pubkey_hash = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         owner_pubkey_hash.push(builder.add_virtual_target());
     }
     
     let mut asset_id = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         asset_id.push(builder.add_virtual_target());
     }
     
     let amount = builder.add_virtual_target();
     
     let mut salt = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         salt.push(builder.add_virtual_target());
     }
     
-    // Perform the hash operation
-    hash_utxo_commitment(builder, &owner_pubkey_hash, &asset_id, amount, &salt);
+    // Hash the dummy UTXO
+    let _ = hash_utxo_commitment(builder, &owner_pubkey_hash, &asset_id, amount, &salt);
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    // Return the number of gates used
+    builder.num_gates() - start_gates
 }
 
 /// Count the number of gates used in the optimized hash gadget
 pub fn count_optimized_hash_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+    let start_gates = builder.num_gates();
     
-    // Create a target to hash
-    let target = builder.add_virtual_target();
+    // Create a dummy input
+    let dummy = builder.add_virtual_target();
     
-    // Perform the optimized hash operation
-    optimized_hash_single(builder, target);
+    // Hash the dummy input using the optimized hash
+    let _ = optimized_hash_single(builder, dummy);
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    // Return the number of gates used
+    builder.num_gates() - start_gates
 }
 
 /// Count the number of gates used in the optimized UTXO hash
 pub fn count_optimized_utxo_hash_gates<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
 ) -> usize {
-    // Store the initial gate count
-    let initial_gates = builder.num_gates();
+    let start_gates = builder.num_gates();
     
-    // Create virtual targets for the UTXO components
+    // Create a dummy UTXO
     let mut owner_pubkey_hash = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         owner_pubkey_hash.push(builder.add_virtual_target());
     }
     
     let mut asset_id = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         asset_id.push(builder.add_virtual_target());
     }
     
     let amount = builder.add_virtual_target();
     
     let mut salt = Vec::with_capacity(4);
-    for _ in 0..4 {
+    for i in 0..4 {
         salt.push(builder.add_virtual_target());
     }
     
-    // Create a UTXO target
+    // Create a UTXOTarget
     let utxo = UTXOTarget {
         owner_pubkey_hash_target: owner_pubkey_hash,
         asset_id_target: asset_id,
@@ -415,54 +568,146 @@ pub fn count_optimized_utxo_hash_gates<F: RichField + Extendable<D>, const D: us
         salt_target: salt,
     };
     
-    // Perform the optimized hash operation
-    optimized_hash_utxo(builder, &utxo);
+    // Hash the dummy UTXO using the optimized hash
+    let _ = optimized_hash_utxo(builder, &utxo);
     
-    // Return the number of gates added
-    builder.num_gates() - initial_gates
+    // Return the number of gates used
+    builder.num_gates() - start_gates
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::Field;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    
+    type F = GoldilocksField;
+    type C = PoseidonGoldilocksConfig;
+    const D: usize = 2;
     
     #[test]
     fn test_hash_multiple_values() {
-        const D: usize = 2;
-        type C = PoseidonGoldilocksConfig;
-        type F = <C as GenericConfig<D>>::F;
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        // Create a circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
+        // Create some test values
+        let value1 = builder.constant(F::from_canonical_u64(123));
+        let value2 = builder.constant(F::from_canonical_u64(456));
+        let value3 = builder.constant(F::from_canonical_u64(789));
         
-        // Create two inputs
-        let input1 = builder.add_virtual_target();
-        let input2 = builder.add_virtual_target();
+        // Hash the values using different methods
+        let hash1 = hash_n(&mut builder, &[value1, value2, value3]);
+        let hash2 = optimized_hash(&mut builder, &[value1, value2, value3]).unwrap();
         
-        // Hash the inputs
-        let hash_output = hash_n(&mut builder, &[input1, input2]);
-        
-        // Make the hash output a public input
-        builder.register_public_input(hash_output);
+        // The hashes should be the same
+        let are_equal = builder.connect(hash1, hash2);
         
         // Build the circuit
         let circuit = builder.build::<C>();
         
-        // Create a partial witness
-        let mut pw = PartialWitness::new();
-        pw.set_target(input1, F::from_canonical_u64(123));
-        pw.set_target(input2, F::from_canonical_u64(456));
+        // The connection should be valid
+        assert!(circuit.verify_gate(are_equal, &[]));
+    }
+    
+    #[test]
+    fn test_domain_separation() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
-        // Generate a proof
-        let proof = circuit.prove(pw).unwrap();
+        // Create some test values
+        let value1 = builder.constant(F::from_canonical_u64(123));
+        let value2 = builder.constant(F::from_canonical_u64(456));
         
-        // Verify the proof
-        circuit.verify(proof).unwrap();
+        // Hash the same values using different domain separators
+        let hash1 = hash_for_signature(&mut builder, &[value1, value2]).unwrap();
+        let hash2 = hash_for_merkle(&mut builder, value1, value2).unwrap();
+        let hash3 = hash_for_nullifier(&mut builder, &[value1, value2]).unwrap();
+        
+        // Create targets for equality checks
+        let eq1 = builder.is_equal(hash1, hash2);
+        let eq2 = builder.is_equal(hash1, hash3);
+        let eq3 = builder.is_equal(hash2, hash3);
+        
+        // All equality checks should be false
+        let false_target = builder.constant_bool(false);
+        builder.connect(eq1.target, false_target.target);
+        builder.connect(eq2.target, false_target.target);
+        builder.connect(eq3.target, false_target.target);
+        
+        // Build the circuit
+        let circuit = builder.build::<C>();
+        
+        // The circuit should be satisfied
+        let proof = circuit.data.prove(vec![]).unwrap();
+        assert!(circuit.data.verify(proof).is_ok());
+    }
+    
+    #[test]
+    fn test_hash_empty_input() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+        
+        // Hash an empty input
+        let hash1 = hash_empty_input(&mut builder);
+        let hash2 = hash(&mut builder, &[]).unwrap();
+        
+        // The hashes should be the same
+        let are_equal = builder.connect(hash1, hash2);
+        
+        // Build the circuit
+        let circuit = builder.build::<C>();
+        
+        // The connection should be valid
+        assert!(circuit.verify_gate(are_equal, &[]));
+    }
+    
+    #[test]
+    fn test_hash_utxo_target_validation() {
+        let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+        
+        // Create a valid UTXO
+        let mut owner_pubkey_hash = Vec::with_capacity(4);
+        for i in 0..4 {
+            owner_pubkey_hash.push(builder.constant(F::from_canonical_u64(i as u64)));
+        }
+        
+        let mut asset_id = Vec::with_capacity(4);
+        for i in 0..4 {
+            asset_id.push(builder.constant(F::from_canonical_u64((i + 10) as u64)));
+        }
+        
+        let amount = builder.constant(F::from_canonical_u64(1000));
+        
+        let mut salt = Vec::with_capacity(4);
+        for i in 0..4 {
+            salt.push(builder.constant(F::from_canonical_u64((i + 20) as u64)));
+        }
+        
+        // Create a UTXOTarget
+        let utxo = UTXOTarget {
+            owner_pubkey_hash_target: owner_pubkey_hash,
+            asset_id_target: asset_id,
+            amount_target: amount,
+            salt_target: salt,
+        };
+        
+        // Hash the UTXO
+        let hash_result = hash_utxo_target(&mut builder, &utxo);
+        assert!(hash_result.is_ok());
+        
+        // Create an invalid UTXO with empty owner_pubkey_hash
+        let invalid_utxo = UTXOTarget {
+            owner_pubkey_hash_target: vec![],
+            asset_id_target: asset_id.clone(),
+            amount_target: amount,
+            salt_target: salt.clone(),
+        };
+        
+        // Hash the invalid UTXO
+        let invalid_hash_result = hash_utxo_target(&mut builder, &invalid_utxo);
+        assert!(invalid_hash_result.is_err());
+        
+        if let Err(WireError::CryptoError(CryptoError::HashError(msg))) = invalid_hash_result {
+            assert!(msg.contains("Owner pubkey hash cannot be empty"));
+        } else {
+            panic!("Expected CryptoError::HashError");
+        }
     }
 }
