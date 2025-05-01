@@ -9,12 +9,23 @@ pub mod core;
 pub mod errors;
 pub mod gadgets;
 pub mod utils;
+pub mod mpc;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
 
 // Re-export common types
 pub use errors::{WireError, WireResult};
+
+// Re-export MPC functionality
+pub use mpc::{
+    MPCCore,
+    MPCConfig,
+    MPCError,
+    MPCResult,
+    init as init_mpc,
+    run_cli as run_mpc_cli,
+};
 
 // Re-export CLI modules
 // pub use cli::{
