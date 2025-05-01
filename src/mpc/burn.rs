@@ -4,7 +4,6 @@
 // and initiating Bitcoin withdrawals.
 
 use crate::mpc::{MPCCore, MPCError, MPCResult};
-use crate::mpc::ceremonies::SigningCeremony;
 use crate::mpc::bitcoin::BitcoinWithdrawal;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;

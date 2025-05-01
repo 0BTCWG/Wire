@@ -4,7 +4,6 @@ use plonky2::field::types::Field;
 use plonky2::hash::hash_types::{HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::{BoolTarget, Target};
-use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::UTXOTarget;
@@ -576,8 +575,12 @@ pub fn count_optimized_utxo_hash_gates<F: RichField + Extendable<D>, const D: us
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::plonk::circuit_builder::CircuitBuilder;
+    use plonky2::plonk::circuit_data::CircuitConfig;
+    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    use plonky2::field::types::Field;
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;

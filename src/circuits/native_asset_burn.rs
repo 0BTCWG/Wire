@@ -10,7 +10,7 @@ use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::plonk::proof::ProofWithPublicInputs;
 
-use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
 use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
 use crate::gadgets::fee::enforce_fee_payment;
 use crate::gadgets::fee::convert_utxo_target;
@@ -18,7 +18,7 @@ use crate::utils::nullifier::compute_utxo_commitment_hash as hash_utxo_commitmen
 use crate::gadgets::verify_message_signature;
 use plonky2::iop::target::BoolTarget;
 
-use crate::core::proof::{serialize_proof, SerializableProof};
+use crate::core::proof::SerializableProof;
 use crate::errors::{WireError, ProofError, WireResult};
 
 /// Helper function to convert BoolTarget to Target

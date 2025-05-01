@@ -1,5 +1,3 @@
-use std::time::Instant;
-use log::{debug, info};
 
 use plonky2::field::extension::Extendable;
 use plonky2::field::types::Field;
@@ -7,8 +5,8 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::errors::{CircuitError, ValidationError, WireError, WireResult};
-use crate::gadgets::hash::{hash, hash_n};
+use crate::errors::{ValidationError, WireError, WireResult};
+use crate::gadgets::hash::hash_n;
 
 /// Specialized gadget for range checks
 /// Efficiently verifies that a value is within a specified range [0, max_value]

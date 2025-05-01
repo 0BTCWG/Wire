@@ -9,13 +9,10 @@ use plonky2_field::types::Field;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use wire_lib::core::UTXO;
 use wire_lib::core::proof::SerializableProof;
-use wire_lib::utils::{
+use wire_lib::utils::recursive_prover::{
     aggregate_proofs,
     verify_aggregated_proof,
     RecursiveProverOptions,
-    generate_proofs_in_parallel,
-    verify_proofs_in_parallel,
-    ParallelProverOptions,
 };
 use wire_lib::utils::wallet::{Wallet, WordCount};
 use wire_lib::circuits::{

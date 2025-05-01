@@ -7,9 +7,9 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+use plonky2::iop::witness::WitnessWrite;
 
-use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
 use crate::gadgets::fee::enforce_fee_payment;
 use crate::gadgets::hash::hash_targets;
 use crate::gadgets::verify_message_signature;
@@ -249,7 +249,7 @@ impl NativeAssetMintCircuit {
         fee_reservoir_address_hash: Vec<u8>,
     ) -> WireResult<crate::core::proof::SerializableProof> {
         use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-        use crate::core::proof::{serialize_proof, ProofError as CoreProofError};
+        use crate::core::proof::serialize_proof;
         
         // Create the circuit
         let _circuit_data = Self::create_circuit();

@@ -6,9 +6,7 @@ use crate::mpc::{MPCError, MPCResult};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
-use sha1::Sha1;
 use pbkdf2::pbkdf2;
-use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -16,7 +14,6 @@ use serde::{Serialize, Deserialize};
 // Remove the totp-rs import as we'll implement our own simple TOTP
 // use totp_rs::{TOTP, Algorithm};
 use qrcode::QrCode;
-use qrcode::render::unicode::Dense1x2;
 
 /// User role
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

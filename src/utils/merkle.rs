@@ -1,6 +1,5 @@
 // Merkle tree utility functions for the 0BTC Wire system
 
-use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2_field::extension::Extendable;

@@ -2,7 +2,7 @@
 //
 // This module provides functionality for rotating MPC key shares securely.
 
-use crate::mpc::{MPCCore, MPCConfig, MPCError, MPCResult};
+use crate::mpc::{MPCCore, MPCError, MPCResult};
 use crate::mpc::core::KeyShare;
 use crate::mpc::ceremonies::{DKGCeremony, CeremonyStatus, Ceremony};
 use crate::mpc::secure_storage::KeyShareStorage;

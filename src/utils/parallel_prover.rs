@@ -1,14 +1,11 @@
 // Parallel proof generation utilities for the 0BTC Wire system
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Instant;
 
 use anyhow;
 use plonky2::field::extension::Extendable;
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_data::CircuitData;
 use plonky2::plonk::config::GenericConfig;
 use plonky2::plonk::proof::ProofWithPublicInputs;
@@ -327,7 +324,12 @@ pub fn verify_proofs_in_parallel<F: RichField + Extendable<D>, C: GenericConfig<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::proof::SerializableProof;
     use plonky2::field::goldilocks_field::GoldilocksField;
+    use plonky2::field::types::Field;
+    use plonky2::iop::target::Target;
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::iop::witness::WitnessWrite;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;

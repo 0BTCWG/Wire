@@ -10,7 +10,7 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::poseidon::PoseidonHash;
 
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
 use crate::gadgets::fee::enforce_fee_payment;
 use crate::gadgets::hash;
 use crate::gadgets::verify_message_signature;

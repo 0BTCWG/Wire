@@ -4,7 +4,6 @@
 // fees collected in the fee reservoir.
 
 use crate::mpc::{MPCCore, MPCError, MPCResult};
-use crate::mpc::ceremonies::SigningCeremony;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;

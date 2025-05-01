@@ -5,20 +5,17 @@ use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::hash::hash_types::RichField;
 use plonky2_field::extension::Extendable;
 use plonky2_field::types::Field;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, CommonCircuitData};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use crate::core::{UTXOTarget, PublicKeyTarget, SignatureTarget, PointTarget, HASH_SIZE};
 use crate::core::proof::{generate_proof, serialize_proof, deserialize_proof, verify_proof, SerializableProof};
 use crate::errors::{WireError, ProofError as CoreProofError, WireResult};
 use crate::gadgets::arithmetic::{lte, gt};
 use crate::gadgets::fee::enforce_fee_payment;
-use crate::gadgets::hash::hash_targets;
-use crate::utils::nullifier::{calculate_and_register_nullifier, compute_utxo_commitment_hash};
 use crate::gadgets::fee::convert_utxo_target;
 
 /// Circuit for transferring assets between UTXOs

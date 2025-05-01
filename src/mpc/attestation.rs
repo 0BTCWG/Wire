@@ -6,7 +6,7 @@
 use crate::mpc::{MPCCore, MPCError, MPCResult};
 use crate::mpc::ceremonies::{SigningCeremony, Ceremony};
 use crate::mpc::bitcoin::BitcoinDeposit;
-use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey, Signature, Verifier};
+use ed25519_dalek::Verifier;
 use serde::{Deserialize, Serialize};
 use serde_arrays;
 use std::collections::HashMap;

@@ -3,7 +3,7 @@
 // This module provides command-line interface functionality for MPC operators.
 
 use crate::mpc::{MPCConfig, MPCCore, MPCError, MPCResult};
-use crate::mpc::ceremonies::{DKGCeremony, SigningCeremony, CeremonyStatus, Ceremony};
+use crate::mpc::ceremonies::{DKGCeremony, SigningCeremony, Ceremony};
 use crate::mpc::bitcoin::{DepositMonitor, WithdrawalProcessor};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;

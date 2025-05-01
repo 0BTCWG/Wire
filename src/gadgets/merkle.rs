@@ -1,6 +1,5 @@
 // Merkle tree gadgets for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
-use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;

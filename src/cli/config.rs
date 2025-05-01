@@ -1,9 +1,9 @@
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
+use serde::{Serialize, Deserialize};
 
-use crate::errors::{IOError, ValidationError, WireError, WireResult};
+use wire_lib::errors::{IOError, ValidationError, WireError, WireResult};
 
 /// Configuration for the Wire CLI
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -209,7 +209,7 @@ impl WireConfig {
         })?;
         
         let config: WireConfig = serde_json::from_str(&content).map_err(|e| {
-            WireError::IOError(IOError::Deserialization(format!(
+            WireError::IOError(IOError::DeserializationError(format!(
                 "Failed to parse configuration file: {}",
                 e
             )))
@@ -233,7 +233,7 @@ impl WireConfig {
         }
         
         let content = serde_json::to_string_pretty(self).map_err(|e| {
-            WireError::IOError(IOError::Serialization(format!(
+            WireError::IOError(IOError::SerializationError(format!(
                 "Failed to serialize configuration: {}",
                 e
             )))
@@ -254,7 +254,7 @@ impl WireConfig {
         let path = path.as_ref();
         
         if path.exists() {
-            return Err(WireError::ValidationError(ValidationError::FormatError(
+            return Err(WireError::ValidationError(ValidationError::InvalidFormat(
                 format!("Configuration file already exists: {}", path.display())
             )));
         }

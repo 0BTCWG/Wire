@@ -2,8 +2,6 @@
 use bip39::{Mnemonic, Language};
 use slip10::{BIP32Path, Curve};
 use ed25519_dalek::{SigningKey, VerifyingKey};
-use hmac::Hmac;
-use sha2::Sha512;
 use rand::{rngs::OsRng, RngCore};
 use thiserror::Error;
 use std::str::FromStr;

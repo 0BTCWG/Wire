@@ -13,7 +13,6 @@ use crate::core::{UTXOTarget, PublicKeyTarget, SignatureTarget};
 use crate::core::proof::{serialize_proof, SerializableProof};
 use crate::errors::{WireError, ProofError, WireResult};
 use crate::gadgets::{calculate_and_register_nullifier, verify_message_signature};
-use crate::gadgets::fee::SignedQuoteTarget;
 
 /// Circuit for burning wrapped Bitcoin (wBTC)
 ///

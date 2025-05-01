@@ -3,7 +3,6 @@
 // Fix imports for ed25519-dalek v2.0.0
 use ed25519_dalek::{Signer, Verifier};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signature};
-use ed25519_dalek::SignatureError;
 // In ed25519-dalek v2.0.0, we need to create our own Keypair struct
 
 /// Our own Keypair struct since ed25519-dalek v2.0.0 no longer provides one
@@ -12,7 +11,6 @@ pub struct Keypair {
     pub public: VerifyingKey,
 }
 
-use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::hash_types::RichField;
 use plonky2_field::extension::Extendable;
@@ -20,7 +18,7 @@ use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::PointTarget;
-use crate::errors::{WireError, CryptoError, WireResult};
+use crate::errors::{CryptoError, WireResult};
 
 /// Generates a new Ed25519 keypair
 pub fn generate_keypair() -> Keypair {

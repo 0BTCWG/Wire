@@ -8,7 +8,6 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use crate::core::{PublicKeyTarget, SignatureTarget, PointTarget};
 use crate::gadgets::hash::hash_n;
 use crate::gadgets::hash::DOMAIN_SIGNATURE;
-use crate::utils::signature::{is_on_curve, optimized_scalar_multiply_targets as point_add, scalar_multiply as get_base_point};
 use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Check if a point is on the curve

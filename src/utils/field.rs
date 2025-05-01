@@ -6,7 +6,7 @@ use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2_field::types::{Field64, Sample};
+use plonky2_field::types::Field64;
 
 /// Converts a field element to its binary representation
 pub fn field_to_bits<F: Field + PrimeField64>(value: F) -> Vec<bool> {
