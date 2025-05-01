@@ -3,7 +3,10 @@
 
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
+use plonky2::hash::poseidon::PoseidonHash;
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::PartialWitness;
+use plonky2::iop::witness::WitnessWrite;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
@@ -56,8 +59,8 @@ fn benchmark_simple_circuit() {
     
     // Create a witness
     let mut pw = PartialWitness::new();
-    pw.set_target(x, F::from_canonical_u64(2));
-    pw.set_target(y, F::from_canonical_u64(3));
+    let _ = pw.set_target(x, F::from_canonical_u64(2));
+    let _ = pw.set_target(y, F::from_canonical_u64(3));
     
     // Generate a proof
     let start = Instant::now();
@@ -86,7 +89,7 @@ fn benchmark_hash_operations() {
     
     // Create hash operations
     let input = builder.add_virtual_target();
-    let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonGoldilocksConfig>(&[input]);
+    let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![input]);
     builder.register_public_input(hash_result.elements[0]);
     
     let circuit_creation_time = start.elapsed();
@@ -104,7 +107,7 @@ fn benchmark_hash_operations() {
     
     // Create a witness
     let mut pw = PartialWitness::new();
-    pw.set_target(input, F::from_canonical_u64(42));
+    let _ = pw.set_target(input, F::from_canonical_u64(42));
     
     // Generate a proof
     let start = Instant::now();
@@ -160,7 +163,7 @@ fn benchmark_complex_circuit() {
     input_hash_inputs.push(input_amount);
     input_hash_inputs.push(input_salt);
     
-    let input_hash = builder.hash_n_to_hash_no_pad::<PoseidonGoldilocksConfig>(&input_hash_inputs);
+    let input_hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(input_hash_inputs);
     
     // Hash the output UTXO
     let mut output_hash_inputs = Vec::new();
@@ -169,7 +172,7 @@ fn benchmark_complex_circuit() {
     output_hash_inputs.push(output_amount);
     output_hash_inputs.push(output_salt);
     
-    let output_hash = builder.hash_n_to_hash_no_pad::<PoseidonGoldilocksConfig>(&output_hash_inputs);
+    let output_hash = builder.hash_n_to_hash_no_pad::<PoseidonHash>(output_hash_inputs);
     
     // Register public inputs
     builder.register_public_input(input_hash.elements[0]);
@@ -193,25 +196,25 @@ fn benchmark_complex_circuit() {
     
     // Set input UTXO values
     for i in 0..32 {
-        pw.set_target(input_pubkey_hash[i], F::from_canonical_u64(i as u64));
-        pw.set_target(input_asset_id[i], F::from_canonical_u64((i + 32) as u64));
-        pw.set_target(output_pubkey_hash[i], F::from_canonical_u64((i + 64) as u64));
-        pw.set_target(output_asset_id[i], F::from_canonical_u64((i + 32) as u64)); // Same asset ID
+        let _ = pw.set_target(input_pubkey_hash[i], F::from_canonical_u64(i as u64));
+        let _ = pw.set_target(input_asset_id[i], F::from_canonical_u64((i + 32) as u64));
+        let _ = pw.set_target(output_pubkey_hash[i], F::from_canonical_u64((i + 64) as u64));
+        let _ = pw.set_target(output_asset_id[i], F::from_canonical_u64((i + 32) as u64)); // Same asset ID
     }
     
-    pw.set_target(input_amount, F::from_canonical_u64(1000));
-    pw.set_target(input_salt, F::from_canonical_u64(12345));
-    pw.set_target(output_amount, F::from_canonical_u64(900)); // Transfer amount minus fee
-    pw.set_target(output_salt, F::from_canonical_u64(67890));
+    let _ = pw.set_target(input_amount, F::from_canonical_u64(1000));
+    let _ = pw.set_target(input_salt, F::from_canonical_u64(12345));
+    let _ = pw.set_target(output_amount, F::from_canonical_u64(900)); // Transfer amount minus fee
+    let _ = pw.set_target(output_salt, F::from_canonical_u64(67890));
     
     // Set signature values
-    pw.set_target(sig_r_x, F::from_canonical_u64(1));
-    pw.set_target(sig_r_y, F::from_canonical_u64(2));
-    pw.set_target(sig_s, F::from_canonical_u64(3));
+    let _ = pw.set_target(sig_r_x, F::from_canonical_u64(1));
+    let _ = pw.set_target(sig_r_y, F::from_canonical_u64(2));
+    let _ = pw.set_target(sig_s, F::from_canonical_u64(3));
     
     // Set public key values
-    pw.set_target(pk_x, F::from_canonical_u64(4));
-    pw.set_target(pk_y, F::from_canonical_u64(5));
+    let _ = pw.set_target(pk_x, F::from_canonical_u64(4));
+    let _ = pw.set_target(pk_y, F::from_canonical_u64(5));
     
     // Generate a proof
     let start = Instant::now();

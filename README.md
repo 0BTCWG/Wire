@@ -22,6 +22,19 @@ The system uses Plonky2, a PLONK-based ZK proving system with recursive verifica
   - `NativeAssetMintCircuit`: Mint additional tokens for existing assets
   - `NativeAssetBurnCircuit`: Burn native asset tokens
 
+- **Security Features**
+  - Domain-separated hash functions for all operations
+  - Secure EdDSA signature verification
+  - Nullifier generation to prevent double-spending
+  - Fee enforcement with expiry timestamps
+  - Comprehensive security review and testing
+
+- **Key Management**
+  - BIP-39 mnemonic phrase generation and recovery
+  - SLIP-0010 HD wallet support for Ed25519 keys
+  - Customizable derivation paths
+  - Secure key storage recommendations
+
 ## Getting Started
 
 ### Prerequisites
@@ -30,6 +43,8 @@ The system uses Plonky2, a PLONK-based ZK proving system with recursive verifica
 - For WASM support: wasm-pack
 
 ### Installation
+
+For detailed installation instructions, see [INSTRUCTIONS.md](INSTRUCTIONS.md).
 
 ```bash
 # Clone the repository
@@ -46,17 +61,25 @@ wasm-pack build --target web
 
 ### Usage
 
+For comprehensive usage instructions, see [USER_GUIDE.md](USER_GUIDE.md).
+
 #### Command Line Interface
 
 ```bash
-# Generate a new keypair
-./target/release/wire keygen --output my_keypair.json
+# Generate a new keypair with mnemonic
+./target/release/wire keygen --words 24 --output my_keypair.json
+
+# Recover from existing mnemonic
+./target/release/wire keygen --mnemonic "your mnemonic phrase here" --output recovered_keypair.json
 
 # Prove a circuit
-./target/release/wire prove --circuit wrapped_asset_mint --input mint_params.json --output mint_proof.json
+./target/release/wire prove --circuit wrapped_asset_mint --input mint_params.json --output mint_proof.json --threads 8
 
 # Verify a proof
-./target/release/wire verify --circuit wrapped_asset_mint --proof mint_proof.json
+./target/release/wire verify --circuit wrapped_asset_mint --proof mint_proof.json --verbose
+
+# Aggregate multiple proofs
+./target/release/wire aggregate --proofs proof1.json,proof2.json,proof3.json --output aggregated.json
 ```
 
 #### WebAssembly API
@@ -64,8 +87,9 @@ wasm-pack build --target web
 ```javascript
 import * as wire from 'wire';
 
-// Generate a keypair
-const keypair = wire.generate_keypair();
+// Generate a keypair with mnemonic
+const keypairWithMnemonic = wire.generate_keypair_with_mnemonic(24);
+console.log(keypairWithMnemonic.mnemonic); // Save this securely!
 
 // Create a proof
 const proof = wire.prove_wrapped_asset_mint(attestationData, custodianPk);
@@ -82,12 +106,27 @@ Wire/
 │   ├── core/           # Core types and constants
 │   ├── gadgets/        # Reusable ZK circuit components
 │   ├── circuits/       # Main ZK circuits
+│   ├── utils/          # Utility functions and modules
+│   │   ├── wallet.rs   # BIP-39 and HD wallet implementation
+│   │   ├── hash.rs     # Domain-separated hash functions
+│   │   ├── signature.rs # EdDSA signature operations
+│   │   └── nullifier.rs # Nullifier generation and verification
 │   ├── cli/            # Command-line interface
 │   ├── wasm/           # WebAssembly bindings
 │   ├── lib.rs          # Library entry point
 │   └── main.rs         # CLI entry point
 ├── docs/               # Documentation
-└── tests/              # Integration tests
+│   ├── mpc_interaction.md  # MPC custody interaction flows
+│   ├── mpc_key_management.md # MPC key management procedures
+│   ├── security_review.md  # Comprehensive security review
+│   └── audit_readiness_checklist.md # Audit preparation checklist
+├── scripts/            # Utility scripts
+│   └── mpc/            # MPC operator scripts
+├── tests/              # Tests
+│   ├── integration/    # End-to-end integration tests
+│   └── audit/          # Security and fuzz tests
+├── USER_GUIDE.md       # Comprehensive user guide
+└── INSTRUCTIONS.md     # Quick start instructions
 ```
 
 ## Development
@@ -96,10 +135,10 @@ Wire/
 
 The project uses a modular approach with reusable gadgets:
 
-- **Hash Gadget**: ZK-friendly hash function (Poseidon)
-- **Signature Verification**: EdDSA signature verification
+- **Hash Gadget**: Domain-separated ZK-friendly hash function (Poseidon)
+- **Signature Verification**: Secure EdDSA signature verification
 - **Nullifier Gadget**: Prevents double-spending of UTXOs
-- **Fee Payment Gadget**: Handles transaction fees
+- **Fee Payment Gadget**: Handles transaction fees with expiry validation
 
 ### Testing
 
@@ -107,9 +146,35 @@ The project uses a modular approach with reusable gadgets:
 # Run unit tests
 cargo test
 
-# Run a specific test
-cargo test test_wrapped_asset_mint
+# Run integration tests
+cargo test --test integration
+
+# Run security and fuzz tests
+cargo test --test audit
 ```
+
+## MPC Custody
+
+The system includes reference implementations for MPC custody operations:
+
+- Fee monitoring and consolidation
+- Attestation generation for minting
+- Burn proof processing for BTC withdrawals
+
+See `docs/mpc_interaction.md` and `docs/mpc_key_management.md` for details.
+
+## Security
+
+0BTC Wire has undergone comprehensive security review and testing:
+
+- Domain separation for all cryptographic operations
+- Secure signature verification with proper curve validation
+- Conservation of value enforcement in all circuits
+- Double-spending prevention through nullifier registration
+- Transaction replay prevention
+- Extensive fuzz testing of all components
+
+See `docs/security_review.md` for the full security analysis.
 
 ## License
 

@@ -1,57 +1,52 @@
 // Field utility functions for the 0BTC Wire system
 
+use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
+use plonky2::field::types::{Field, PrimeField64};
 use plonky2::hash::hash_types::RichField;
-use plonky2_field::extension::Extendable;
-use plonky2_field::types::Field64;
 use plonky2::iop::target::{BoolTarget, Target};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2_field::types::{Field64, Sample};
 
 /// Converts a field element to its binary representation
-pub fn field_to_bits<F: Field>(value: F) -> Vec<bool> {
-    let bit_length = 64; // Default to 64 bits for u64 representation
+pub fn field_to_bits<F: Field + PrimeField64>(value: F) -> Vec<bool> {
+    let mut result = Vec::new();
+    let mut val = value.to_canonical_u64();
+    
+    while val > 0u64 {
+        result.push((val & 1u64) == 1u64);
+        val >>= 1;
+    }
+    
+    result.reverse();
+    result
+}
+
+/// Converts a field element to its binary representation with a fixed length
+pub fn field_to_bits_with_length<F: Field + PrimeField64>(value: F, bit_length: usize) -> Vec<bool> {
     let mut result = Vec::with_capacity(bit_length);
     let mut val = value.to_canonical_u64();
     
     for _ in 0..bit_length {
-        result.push(val & 1 == 1);
+        result.push((val & 1u64) != 0u64);
         val >>= 1;
     }
     
+    result.reverse();
     result
 }
 
-/// Converts a field element to its binary representation with specified bit length
-pub fn field_to_bits_with_length<F: Field>(value: F, bit_length: usize) -> Vec<bool> {
-    let mut result = Vec::with_capacity(bit_length);
-    let mut val = value.to_canonical_u64();
-    
-    for _ in 0..bit_length {
-        result.push(val & 1 == 1);
-        val >>= 1;
-    }
-    
-    result
+/// Converts a field element target to its binary representation in the circuit
+pub fn field_to_bits_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    value: Target,
+    bit_length: usize,
+) -> Vec<BoolTarget> {
+    builder.split_le(value, bit_length)
 }
 
-/// Converts a binary representation to a field element
-pub fn bits_to_field<F: Field>(bits: &[bool]) -> F {
-    let mut result = F::ZERO;
-    let mut power = F::ONE;
-    
-    for &bit in bits {
-        if bit {
-            result += power;
-        }
-        power = power.double();
-    }
-    
-    result
-}
-
-/// Adds field element targets in the circuit
-pub fn add_field_targets<F: Field, const D: usize>(
+/// Adds two field element targets in the circuit
+pub fn add_field_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
     b: Target,
@@ -59,8 +54,8 @@ pub fn add_field_targets<F: Field, const D: usize>(
     builder.add(a, b)
 }
 
-/// Multiplies field element targets in the circuit
-pub fn mul_field_targets<F: Field, const D: usize>(
+/// Multiplies two field element targets in the circuit
+pub fn mul_field_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
     b: Target,
@@ -69,7 +64,7 @@ pub fn mul_field_targets<F: Field, const D: usize>(
 }
 
 /// Computes the inverse of a field element target in the circuit
-pub fn inverse_field_target<F: Field, const D: usize>(
+pub fn inverse_field_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
 ) -> Target {
@@ -82,12 +77,12 @@ pub fn u64_to_field<F: Field>(value: u64) -> F {
 }
 
 /// Converts a field element to a u64
-pub fn field_to_u64<F: Field>(value: F) -> u64 {
+pub fn field_to_u64<F: Field + PrimeField64>(value: F) -> u64 {
     value.to_canonical_u64()
 }
 
 /// Computes the square of a field element target in the circuit
-pub fn square_field_target<F: Field, const D: usize>(
+pub fn square_field_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
 ) -> Target {
@@ -95,7 +90,7 @@ pub fn square_field_target<F: Field, const D: usize>(
 }
 
 /// Computes the cube of a field element target in the circuit
-pub fn cube_field_target<F: Field, const D: usize>(
+pub fn cube_field_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     a: Target,
 ) -> Target {
@@ -132,67 +127,52 @@ pub fn pow_field_target<F: RichField + Extendable<D>, const D: usize>(
     result
 }
 
-/// Converts a field element to its binary representation in the circuit (little-endian)
-pub fn field_to_bits_le_target<F: RichField + Extendable<D>, const D: usize>(
+/// Converts a bit array to a field element
+pub fn bits_to_field<F: Field>(bits: &[bool]) -> F {
+    let mut result = F::ZERO;
+    for &bit in bits {
+        result = result + result;
+        if bit {
+            result = result + F::ONE;
+        }
+    }
+    result
+}
+
+/// Converts a bit array target to a field element target in the circuit
+pub fn bits_to_field_target<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-    value: Target,
-    bit_length: usize,
-) -> Vec<BoolTarget> {
-    let mut result = Vec::with_capacity(bit_length);
+    bits: &[BoolTarget],
+) -> Target {
+    let mut result = builder.zero();
+    let two = builder.two();
     
-    // Use the built-in CircuitBuilder method to split into bits
-    let bits = builder.split_le(value, bit_length);
-    
-    // Convert each bit to a BoolTarget
-    for i in 0..bit_length {
-        result.push(bits[i]);
+    for &bit in bits {
+        // First compute result * 2
+        let result_times_two = builder.mul(result, two);
+        
+        // Then add the bit
+        result = builder.add(result_times_two, bit.target);
     }
     
     result
 }
 
-/// Converts a field element to its binary representation in the circuit (little-endian)
-/// This is a duplicate function and should be removed
-/// Use field_to_bits_le_target instead
-#[deprecated(since = "0.1.0", note = "Use field_to_bits_le_target instead")]
-pub fn field_to_bits_le_target_old<F: RichField + Extendable<2>>(
-    builder: &mut CircuitBuilder<F, 2>,
-    value: Target,
-    bit_length: usize,
-) -> Vec<BoolTarget> {
-    field_to_bits_le_target(builder, value, bit_length)
-}
-
-/// Converts a field element to its binary representation in the circuit (little-endian)
-pub fn field_to_bits_le_target<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    value: Target,
-    bit_length: usize,
-) -> Vec<BoolTarget> {
-    let mut result = Vec::with_capacity(bit_length);
-    
-    // Use the built-in CircuitBuilder method to split into bits
-    let bits = builder.split_le(value, bit_length);
-    
-    // Convert each bit to a BoolTarget
-    for i in 0..bit_length {
-        result.push(bits[i]);
-    }
-    
-    result
-}
-
-/// Returns the Goldilocks field modulus
-pub fn goldilocks_modulus() -> u64 {
-    GoldilocksField::ORDER
-}
-
-/// Checks if a u64 value is within the Goldilocks field range
-pub fn is_in_goldilocks_field_range(value: u64) -> bool {
+/// Checks if a u64 is less than the field order
+pub fn is_valid_field_element(value: u64) -> bool {
     value < GoldilocksField::ORDER
 }
 
-/// Reduces a u64 value modulo the Goldilocks field modulus
-pub fn reduce_to_goldilocks_field_range(value: u64) -> u64 {
+/// Reduces a u64 modulo the field order
+pub fn reduce_to_field_element(value: u64) -> u64 {
     value % GoldilocksField::ORDER
+}
+
+/// Converts a field element to a little-endian bit array target in the circuit
+pub fn field_to_bits_le_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    value: Target,
+    bit_length: usize,
+) -> Vec<BoolTarget> {
+    builder.split_le(value, bit_length)
 }

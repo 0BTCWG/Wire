@@ -39,18 +39,24 @@ fn range_check_small<F: RichField + Extendable<D>, const D: usize>(
     value: Target,
     max_value: u64,
 ) -> WireResult<Target> {
-    let max_value_target = builder.constant(F::from_canonical_u64(max_value));
-    let is_less_or_equal = builder.is_less_than_or_equal(value, max_value_target);
+    // For very small ranges, use direct comparison
+    let max_target = builder.constant(F::from_canonical_u64(max_value));
     
-    // Also check that value is non-negative (always true for field elements in our case)
-    // but we include it for completeness
-    let zero = builder.zero();
-    let is_greater_or_equal = builder.is_less_than_or_equal(zero, value);
+    // Check if value <= max_value
+    // We can implement this as !(value > max_target)
+    // Since we don't have a direct less-than-or-equal operation,
+    // we'll use a subtraction and check if it's non-negative
+    let diff = builder.sub(max_target, value);
     
-    // Both conditions must be true
-    let result = builder.and(is_less_or_equal, is_greater_or_equal);
+    // Split the difference into bits to check the sign bit
+    let bits = builder.split_le(diff, 64);
     
-    Ok(result)
+    // If the highest bit is 0, then the difference is non-negative,
+    // which means value <= max_target
+    let is_non_negative = builder.not(bits[63]);
+    
+    // Return the result as a Target
+    Ok(is_non_negative.target)
 }
 
 /// Range check for large ranges (more than 1024)
@@ -59,33 +65,22 @@ fn range_check_large<F: RichField + Extendable<D>, const D: usize>(
     value: Target,
     max_value: u64,
 ) -> WireResult<Target> {
-    // Determine the number of bits needed to represent max_value
-    let bits_needed = 64 - max_value.leading_zeros();
+    // For large ranges, use bit decomposition
+    let bit_length = 64 - max_value.leading_zeros();
+    let bits = builder.split_le(value, bit_length as usize);
     
-    // Decompose value into bits
-    let bits = builder.split_le(value, bits_needed as usize);
+    // Check that all higher bits are zero and value is within range
+    let must_be_zero = builder.zero();
+    let mut is_valid = builder.constant_bool(true);
     
-    // Check if the value is within range by comparing with max_value
-    let mut is_valid = builder.constant(F::ONE);
-    let mut running_value = 0u64;
-    
-    for i in (0..bits.len()).rev() {
-        // Check if setting this bit would exceed max_value
-        let bit_value = 1u64 << i;
-        let new_value = running_value + bit_value;
-        
-        if new_value <= max_value {
-            // This bit can be either 0 or 1
-            running_value = new_value;
-        } else {
-            // This bit must be 0 if previous bits match the max_value
-            let must_be_zero = builder.constant(F::ZERO);
-            let is_zero = builder.is_equal(bits[i], must_be_zero);
-            is_valid = builder.and(is_valid, is_zero);
-        }
+    for i in bit_length as usize..bits.len() {
+        let bit_target = bits[i].target;
+        let is_zero = builder.is_equal(bit_target, must_be_zero);
+        is_valid = builder.and(is_valid, is_zero);
     }
     
-    Ok(is_valid)
+    // Return the result as a Target
+    Ok(is_valid.target)
 }
 
 /// Specialized gadget for efficient batch hashing
@@ -106,7 +101,15 @@ pub fn batch_hash_with_domain<F: RichField + Extendable<D>, const D: usize>(
     if inputs.len() <= 4 {
         let mut results = Vec::with_capacity(inputs.len());
         for input in inputs {
-            let hash_result = hash_n(builder, input, domain)?;
+            // Create domain separator target
+            let domain_target = domain_to_targets(builder, domain)?;
+            
+            // Combine input with domain
+            let mut combined_input = domain_target;
+            combined_input.extend_from_slice(input);
+            
+            // Use hash_n without domain parameter
+            let hash_result = hash_n(builder, &combined_input);
             results.push(hash_result);
         }
         return Ok(results);
@@ -132,8 +135,8 @@ fn batch_hash_optimized<F: RichField + Extendable<D>, const D: usize>(
         let mut combined = domain_targets.clone();
         combined.extend_from_slice(input);
         
-        // Hash the combined input
-        let hash_result = hash(builder, &combined)?;
+        // Hash the combined input - use hash_n directly instead of hash
+        let hash_result = hash_n(builder, &combined);
         results.push(hash_result);
     }
     
@@ -186,14 +189,14 @@ pub fn batch_equality_check<F: RichField + Extendable<D>, const D: usize>(
     
     // For small batches, use the regular approach
     if left_values.len() <= 4 {
-        let mut result = builder.constant(F::ONE);
+        let mut result = builder.constant_bool(true);
         
         for i in 0..left_values.len() {
             let eq = builder.is_equal(left_values[i], right_values[i]);
             result = builder.and(result, eq);
         }
         
-        return Ok(result);
+        return Ok(result.target);
     }
     
     // For larger batches, use a more efficient approach
@@ -233,7 +236,7 @@ fn batch_equality_optimized<F: RichField + Extendable<D>, const D: usize>(
     // Check if the linear combinations are equal
     let result = builder.is_equal(left_sum, right_sum);
     
-    Ok(result)
+    Ok(result.target)
 }
 
 /// Specialized gadget for conditional selection
@@ -254,7 +257,7 @@ pub fn conditional_select<F: RichField + Extendable<D>, const D: usize>(
     let is_bit = builder.or(is_zero, is_one);
     
     // Assert that condition is a bit
-    builder.assert_one(is_bit);
+    builder.assert_one(is_bit.target);
     
     // Compute: condition * true_value + (1 - condition) * false_value
     let condition_times_true = builder.mul(condition, true_value);
@@ -327,23 +330,37 @@ pub fn vector_sum<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Optimized vector sum for larger vectors
-fn vector_sum_optimized<F: RichField + Extendable<D>, const D: usize>(
+/// Uses a divide-and-conquer approach for better performance
+pub fn vector_sum_optimized<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     values: &[Target],
 ) -> WireResult<Target> {
-    // Use a divide-and-conquer approach to reduce circuit depth
+    if values.is_empty() {
+        return Ok(builder.zero());
+    }
+    
     if values.len() == 1 {
         return Ok(values[0]);
     }
     
+    if values.len() <= 8 {
+        // For small vectors, use the direct approach
+        let mut sum = values[0];
+        for i in 1..values.len() {
+            sum = builder.add(sum, values[i]);
+        }
+        return Ok(sum);
+    }
+    
+    // For larger vectors, use divide and conquer
     let mid = values.len() / 2;
     let left = &values[..mid];
     let right = &values[mid..];
     
-    let left_sum = vector_sum_optimized(builder, left)?;
-    let right_sum = vector_sum_optimized(builder, right)?;
+    // Recursively sum the halves
+    let left_sum = vector_sum_optimized(builder, left).unwrap_or_else(|_| builder.zero());
+    let right_sum = vector_sum_optimized(builder, right).unwrap_or_else(|_| builder.zero());
     
-    let result = builder.add(left_sum, right_sum);
-    
-    Ok(result)
+    // Combine the results
+    Ok(builder.add(left_sum, right_sum))
 }

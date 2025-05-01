@@ -1,30 +1,27 @@
-use clap::{App, Arg};
-use serde_json::{json, Value};
+use clap::{Arg, Command};
+use serde_json::json;
 use std::fs::{self, File};
 use std::io::Write;
 use std::path::Path;
-
 use wire_lib::circuits::wrapped_asset_mint::WrappedAssetMintCircuit;
 use wire_lib::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
 use wire_lib::circuits::transfer::TransferCircuit;
-use wire_lib::utils::recursive_prover::{aggregate_proofs, verify_aggregated_proof};
 
 fn main() {
-    let matches = App::new("0BTC Wire Audit Test Vector Generator")
+    let matches = Command::new("0BTC Wire Audit Test Vector Generator")
         .version("1.0")
         .author("0BTC Wire Team")
         .about("Generates test vectors for the 0BTC Wire audit")
         .arg(
-            Arg::with_name("output-dir")
+            Arg::new("output-dir")
                 .long("output-dir")
                 .value_name("DIR")
                 .help("Directory to output test vectors")
-                .required(true)
-                .takes_value(true),
+                .required(true),
         )
         .get_matches();
 
-    let output_dir = matches.value_of("output-dir").unwrap();
+    let output_dir = matches.get_one::<String>("output-dir").unwrap();
     let output_path = Path::new(output_dir);
 
     // Create output directory if it doesn't exist
@@ -36,7 +33,6 @@ fn main() {
     generate_wrapped_mint_test_vectors(output_path);
     generate_wrapped_burn_test_vectors(output_path);
     generate_transfer_test_vectors(output_path);
-    generate_recursive_aggregation_test_vectors(output_path);
 
     println!("Test vectors generated successfully in {}", output_dir);
 }
@@ -54,10 +50,10 @@ fn generate_wrapped_mint_test_vectors(output_path: &Path) {
     let custodian_pk_y = 0x1122334455667788;
     let signature_r_x = 0xaabbccddeeff0011;
     let signature_r_y = 0x2233445566778899;
-    let signature_s = 0x99887766554433221100;
+    let signature_s = 0x9988776655443322;
 
-    // Generate proof
-    let result = WrappedAssetMintCircuit::generate_proof_static(
+    // Skip creating a circuit instance and use the static method directly
+    let result = WrappedAssetMintCircuit::generate_proof(
         &recipient_pk_hash,
         amount,
         deposit_nonce,
@@ -162,10 +158,10 @@ fn generate_wrapped_burn_test_vectors(output_path: &Path) {
     let sender_pk_y = 0x1122334455667788;
     let signature_r_x = 0xaabbccddeeff0011;
     let signature_r_y = 0x2233445566778899;
-    let signature_s = 0x99887766554433221100;
+    let signature_s = 0x9988776655443322;
     let destination_btc_address = vec![0x76, 0xa9, 0x14, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x88, 0xac];
 
-    // Generate proof
+    // Skip creating a circuit instance and use the static method directly
     let result = WrappedAssetBurnCircuit::generate_proof_static(
         &owner_pubkey_hash,
         &asset_id,
@@ -178,13 +174,13 @@ fn generate_wrapped_burn_test_vectors(output_path: &Path) {
         signature_r_y,
         signature_s,
         &destination_btc_address,
-        None, // No fee
-        None, // No expiry
-        None, // No fee signature r_x
-        None, // No fee signature r_y
-        None, // No fee signature s
-        None, // No custodian pk_x
-        None, // No custodian pk_y
+        None, // fee_btc
+        None, // fee_expiry
+        None, // fee_signature_r_x
+        None, // fee_signature_r_y
+        None, // fee_signature_s
+        None, // custodian_pk_x
+        None, // custodian_pk_y
     );
 
     if let Ok(proof) = result {
@@ -286,11 +282,11 @@ fn generate_transfer_test_vectors(output_path: &Path) {
     let amount = 1_000_000; // 0.01 BTC in satoshis
     let salt = vec![0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88];
     let sender_sk = 0x1234567890abcdef;
-    let sender_pk_x = 0xfedcba0987654321;
-    let sender_pk_y = 0x1122334455667788;
-    let signature_r_x = 0xaabbccddeeff0011;
-    let signature_r_y = 0x2233445566778899;
-    let signature_s = 0x99887766554433221100;
+    let sender_pk_x: u64 = 0xfedcba0987654321;
+    let sender_pk_y: u64 = 0x1122334455667788;
+    let signature_r_x: u64 = 0xaabbccddeeff0011;
+    let signature_r_y: u64 = 0x2233445566778899;
+    let signature_s: u64 = 0x9988776655443322;
     let recipient_pk_hash = vec![0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32, 0x10];
     let output_amount = amount / 2; // Split the amount
     let fee_amount = 1000; // 1000 satoshis fee
@@ -307,18 +303,52 @@ fn generate_transfer_test_vectors(output_path: &Path) {
     // Create fee UTXO data (using the same UTXO for simplicity)
     let fee_input_utxo_data = (owner_pubkey_hash.clone(), asset_id.clone(), amount, salt.clone());
 
+    // Convert input data to the correct format
+    let input_utxos: Vec<Vec<u8>> = input_utxos_data.iter().map(|utxo| {
+        let (owner_pk_hash, asset_id, amount, salt) = utxo;
+        // Convert amount to bytes directly
+        let mut amount_bytes = Vec::with_capacity(8);
+        let amount_bytes_array = u64_to_le_bytes(*amount);
+        amount_bytes.extend_from_slice(&amount_bytes_array);
+        vec![
+            owner_pk_hash.clone(),
+            asset_id.clone(),
+            amount_bytes,
+            salt.clone()
+        ].concat()
+    }).collect();
+
+    // Create a transfer circuit instance
+    let transfer_circuit = TransferCircuit::new(
+        input_utxos_data.len(),
+        recipient_pk_hashes.clone(),
+        output_amounts.clone(),
+        vec![sender_pk_x.to_le_bytes().to_vec(), sender_pk_y.to_le_bytes().to_vec()].concat(),
+        vec![signature_r_x.to_le_bytes().to_vec(), signature_r_y.to_le_bytes().to_vec(), signature_s.to_le_bytes().to_vec()].concat(),
+        vec![
+            fee_input_utxo_data.0.clone(),
+            fee_input_utxo_data.1.clone(),
+            fee_input_utxo_data.2.to_le_bytes().to_vec(),
+            fee_input_utxo_data.3.clone()
+        ].concat(),
+        fee_amount,
+        fee_reservoir_address_hash.clone(),
+    );
+    
     // Generate proof
-    let result = TransferCircuit::generate_proof_static(
-        input_utxos_data.clone(),
+    let result = transfer_circuit.generate_proof(
+        input_utxos,
         recipient_pk_hashes.clone(),
         output_amounts.clone(),
         sender_sk,
-        sender_pk_x,
-        sender_pk_y,
-        signature_r_x,
-        signature_r_y,
-        signature_s,
-        fee_input_utxo_data.clone(),
+        vec![sender_pk_x.to_le_bytes().to_vec(), sender_pk_y.to_le_bytes().to_vec()].concat(),
+        vec![signature_r_x.to_le_bytes().to_vec(), signature_r_y.to_le_bytes().to_vec(), signature_s.to_le_bytes().to_vec()].concat(),
+        vec![
+            fee_input_utxo_data.0.clone(),
+            fee_input_utxo_data.1.clone(),
+            fee_input_utxo_data.2.to_le_bytes().to_vec(),
+            fee_input_utxo_data.3.clone()
+        ].concat(),
         fee_amount,
         fee_reservoir_address_hash.clone(),
         nonce,
@@ -455,113 +485,16 @@ fn generate_transfer_test_vectors(output_path: &Path) {
     }
 }
 
-fn generate_recursive_aggregation_test_vectors(output_path: &Path) {
-    println!("Generating recursive aggregation test vectors...");
-
-    let mut test_vectors = Vec::new();
-
-    // Generate a wrapped mint proof
-    let recipient_pk_hash = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
-    let amount = 1_000_000; // 0.01 BTC in satoshis
-    let deposit_nonce = 42;
-    let custodian_pk_x = 0xfedcba0987654321;
-    let custodian_pk_y = 0x1122334455667788;
-    let signature_r_x = 0xaabbccddeeff0011;
-    let signature_r_y = 0x2233445566778899;
-    let signature_s = 0x99887766554433221100;
-
-    let mint_result = WrappedAssetMintCircuit::generate_proof_static(
-        &recipient_pk_hash,
-        amount,
-        deposit_nonce,
-        custodian_pk_x,
-        custodian_pk_y,
-        signature_r_x,
-        signature_r_y,
-        signature_s,
-    );
-
-    // Generate a wrapped burn proof
-    let owner_pubkey_hash = vec![0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef];
-    let asset_id = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
-    let burn_amount = 500_000; // 0.005 BTC in satoshis
-    let salt = vec![0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88];
-    let sender_sk = 0x1234567890abcdef;
-    let sender_pk_x = 0xfedcba0987654321;
-    let sender_pk_y = 0x1122334455667788;
-    let burn_signature_r_x = 0xaabbccddeeff0011;
-    let burn_signature_r_y = 0x2233445566778899;
-    let burn_signature_s = 0x99887766554433221100;
-    let destination_btc_address = vec![0x76, 0xa9, 0x14, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0x88, 0xac];
-
-    let burn_result = WrappedAssetBurnCircuit::generate_proof_static(
-        &owner_pubkey_hash,
-        &asset_id,
-        burn_amount,
-        &salt,
-        sender_sk,
-        sender_pk_x,
-        sender_pk_y,
-        burn_signature_r_x,
-        burn_signature_r_y,
-        burn_signature_s,
-        &destination_btc_address,
-        None, // No fee
-        None, // No expiry
-        None, // No fee signature r_x
-        None, // No fee signature r_y
-        None, // No fee signature s
-        None, // No custodian pk_x
-        None, // No custodian pk_y
-    );
-
-    if let (Ok(mint_proof), Ok(burn_proof)) = (mint_result, burn_result) {
-        // Aggregate the proofs
-        let proofs = vec![mint_proof.clone(), burn_proof.clone()];
-        let aggregation_result = aggregate_proofs(&proofs, "wrapped-mint", 2);
-
-        if let Ok(aggregated_proof) = aggregation_result {
-            // Verify the aggregated proof
-            let verification_result = verify_aggregated_proof(&aggregated_proof, "wrapped-mint");
-
-            // Create test vector
-            let test_vector = json!({
-                "name": "valid_recursive_aggregation",
-                "description": "Valid recursive aggregation of wrapped mint and burn proofs",
-                "inputs": {
-                    "proofs": [
-                        {
-                            "type": "wrapped-mint",
-                            "proof": mint_proof
-                        },
-                        {
-                            "type": "wrapped-burn",
-                            "proof": burn_proof
-                        }
-                    ],
-                    "circuit_type": "wrapped-mint",
-                    "batch_size": 2
-                },
-                "expected_result": {
-                    "valid": true
-                },
-                "aggregated_proof": aggregated_proof,
-                "verification_result": verification_result.is_ok()
-            });
-
-            test_vectors.push(test_vector);
-
-            // Write test vectors to file
-            let file_path = output_path.join("recursive_aggregation_test_vectors.json");
-            let mut file = File::create(&file_path).expect("Failed to create file");
-            let json_str = serde_json::to_string_pretty(&test_vectors).expect("Failed to serialize test vectors");
-            file.write_all(json_str.as_bytes()).expect("Failed to write test vectors");
-
-            println!("Recursive aggregation test vectors written to {:?}", file_path);
-        } else {
-            println!("Failed to aggregate proofs: {:?}", aggregation_result.err());
-        }
-    } else {
-        println!("Failed to generate proofs for aggregation");
-    }
+// Helper function to convert u64 to little-endian bytes
+fn u64_to_le_bytes(value: u64) -> [u8; 8] {
+    let mut bytes = [0u8; 8];
+    bytes[0] = value as u8;
+    bytes[1] = (value >> 8) as u8;
+    bytes[2] = (value >> 16) as u8;
+    bytes[3] = (value >> 24) as u8;
+    bytes[4] = (value >> 32) as u8;
+    bytes[5] = (value >> 40) as u8;
+    bytes[6] = (value >> 48) as u8;
+    bytes[7] = (value >> 56) as u8;
+    bytes
 }

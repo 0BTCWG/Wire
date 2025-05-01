@@ -26,13 +26,13 @@ pub struct UTXO<F: RichField> {
 #[derive(Debug, Clone)]
 pub struct UTXOTarget {
     /// The hash of the owner's public key target
-    pub owner_pubkey_hash: Target,
+    pub owner_pubkey_hash_target: Vec<Target>,
     /// The asset ID target
-    pub asset_id: Target,
+    pub asset_id_target: Vec<Target>,
     /// The amount target
-    pub amount: Target,
+    pub amount_target: Vec<Target>,
     /// A random salt target for privacy
-    pub salt: Target,
+    pub salt_target: Vec<Target>,
 }
 
 /// Computes the commitment hash for a UTXO
@@ -45,17 +45,42 @@ pub fn compute_utxo_hash<F: RichField>(utxo: &UTXO<F>) -> F {
     )
 }
 
-/// Computes the commitment hash for a UTXO in the circuit
-pub fn compute_utxo_hash_target<F: RichField + Extendable<D>, const D: usize>(
+/// Computes the commitment hash for a UTXO target in the circuit
+pub fn compute_utxo_commitment_hash<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
     utxo: &UTXOTarget,
 ) -> Target {
+    // We need to extract a single Target from the vectors
+    let owner_pubkey_hash = if !utxo.owner_pubkey_hash_target.is_empty() {
+        utxo.owner_pubkey_hash_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let asset_id = if !utxo.asset_id_target.is_empty() {
+        utxo.asset_id_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let amount = if !utxo.amount_target.is_empty() {
+        utxo.amount_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let salt = if !utxo.salt_target.is_empty() {
+        utxo.salt_target[0]
+    } else {
+        builder.zero()
+    };
+    
     compute_utxo_commitment_targets(
         builder,
-        utxo.owner_pubkey_hash,
-        utxo.asset_id,
-        utxo.amount,
-        utxo.salt,
+        owner_pubkey_hash,
+        asset_id,
+        amount,
+        salt,
     )
 }
 
@@ -74,12 +99,37 @@ pub fn compute_utxo_nullifier_target<F: RichField + Extendable<D>, const D: usiz
     builder: &mut CircuitBuilder<F, D>,
     utxo: &UTXOTarget,
 ) -> Target {
+    // We need to extract a single Target from the vectors
+    let owner_pubkey_hash = if !utxo.owner_pubkey_hash_target.is_empty() {
+        utxo.owner_pubkey_hash_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let asset_id = if !utxo.asset_id_target.is_empty() {
+        utxo.asset_id_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let amount = if !utxo.amount_target.is_empty() {
+        utxo.amount_target[0]
+    } else {
+        builder.zero()
+    };
+    
+    let salt = if !utxo.salt_target.is_empty() {
+        utxo.salt_target[0]
+    } else {
+        builder.zero()
+    };
+    
     compute_nullifier_targets(
         builder,
-        utxo.owner_pubkey_hash,
-        utxo.asset_id,
-        utxo.amount,
-        utxo.salt,
+        owner_pubkey_hash,
+        asset_id,
+        amount,
+        salt,
     )
 }
 
@@ -107,10 +157,10 @@ pub fn create_utxo_target<F: RichField + Extendable<D>, const D: usize>(
     salt: Target,
 ) -> UTXOTarget {
     UTXOTarget {
-        owner_pubkey_hash,
-        asset_id,
-        amount,
-        salt,
+        owner_pubkey_hash_target: vec![owner_pubkey_hash],
+        asset_id_target: vec![asset_id],
+        amount_target: vec![amount],
+        salt_target: vec![salt],
     }
 }
 
@@ -166,10 +216,10 @@ pub fn utxos_equal_target<F: RichField + Extendable<D>, const D: usize>(
     b: &UTXOTarget,
 ) -> BoolTarget {
     // Check equality for each field
-    let owner_equal = builder.is_equal(a.owner_pubkey_hash, b.owner_pubkey_hash);
-    let asset_equal = builder.is_equal(a.asset_id, b.asset_id);
-    let amount_equal = builder.is_equal(a.amount, b.amount);
-    let salt_equal = builder.is_equal(a.salt, b.salt);
+    let owner_equal = builder.is_equal(a.owner_pubkey_hash_target[0], b.owner_pubkey_hash_target[0]);
+    let asset_equal = builder.is_equal(a.asset_id_target[0], b.asset_id_target[0]);
+    let amount_equal = builder.is_equal(a.amount_target[0], b.amount_target[0]);
+    let salt_equal = builder.is_equal(a.salt_target[0], b.salt_target[0]);
     
     // All fields must be equal for the UTXOs to be equal
     let mut result = owner_equal;
@@ -200,4 +250,23 @@ pub fn fields_to_utxo<F: RichField>(fields: &[F]) -> UTXO<F> {
         amount: fields[2],
         salt: fields[3],
     }
+}
+
+/// Calculates and registers a nullifier for a UTXO in the circuit
+pub fn calculate_and_register_nullifier<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    utxo: &UTXOTarget,
+    _owner_sk: Target,
+) -> Target {
+    // Compute the nullifier using the domain-separated hash function
+    let nullifier = compute_utxo_nullifier_target(
+        builder,
+        utxo,
+    );
+    
+    // Register the nullifier as a public input
+    builder.register_public_input(nullifier);
+    
+    // Return the nullifier
+    nullifier
 }

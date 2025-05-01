@@ -1,10 +1,12 @@
 // Proof utilities for the 0BTC Wire system
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::types::PrimeField64;
+use plonky2::hash::hash_types::RichField;
+use plonky2_field::extension::Extendable;
 use plonky2::plonk::circuit_data::{CircuitData, VerifierOnlyCircuitData, CommonCircuitData};
 use plonky2::plonk::config::{PoseidonGoldilocksConfig, GenericConfig};
 use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
 use plonky2::iop::witness::PartialWitness;
-use plonky2_field::types::PrimeField64;
 use serde::{Serialize, Deserialize};
 use std::error::Error;
 use std::fmt;
@@ -40,14 +42,14 @@ pub struct SerializableProof {
 
 impl SerializableProof {
     /// Convert the serializable proof back to a Plonky2 proof
-    pub fn to_proof<F: PrimeField64, C: GenericConfig<D, F = F>, const D: usize>(
+    pub fn to_proof<F: PrimeField64 + RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
         &self,
         common_data: &CommonCircuitData<F, D>,
     ) -> Result<ProofWithPublicInputs<F, C, D>, ProofError> {
         let proof_bytes = hex::decode(&self.proof_bytes)
             .map_err(|e| ProofError::DeserializationError(format!("Failed to decode proof bytes: {}", e)))?;
         
-        let proof = ProofWithPublicInputs::from_bytes(common_data, &proof_bytes)
+        let proof = ProofWithPublicInputs::from_bytes(proof_bytes, common_data)
             .map_err(|e| ProofError::DeserializationError(format!("Failed to deserialize proof: {}", e)))?;
         
         Ok(proof)
@@ -76,14 +78,10 @@ pub fn verify_proof(
 pub fn serialize_proof(
     proof: &ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>,
 ) -> Result<SerializableProof, ProofError> {
-    // Serialize the proof to bytes
-    let proof_bytes = proof.to_bytes()
-        .map_err(|e| ProofError::SerializationError(format!("Failed to serialize proof: {}", e)))?;
+    let proof_bytes = proof.to_bytes();
     
-    // Convert the proof bytes to a hex string
     let proof_hex = hex::encode(proof_bytes);
     
-    // Convert public inputs to strings
     let public_inputs: Vec<String> = proof.public_inputs
         .iter()
         .map(|input| input.to_canonical_u64().to_string())

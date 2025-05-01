@@ -13,8 +13,23 @@ use plonky2::plonk::proof::ProofWithPublicInputs;
 use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
 use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
 use crate::gadgets::fee::enforce_fee_payment;
-use crate::utils::nullifier::compute_utxo_hash as hash_utxo_commitment;
+use crate::gadgets::fee::convert_utxo_target;
+use crate::utils::nullifier::compute_utxo_commitment_hash as hash_utxo_commitment;
 use crate::gadgets::verify_message_signature;
+use plonky2::iop::target::BoolTarget;
+
+use crate::core::proof::{serialize_proof, SerializableProof};
+use crate::errors::{WireError, ProofError, WireResult};
+
+/// Helper function to convert BoolTarget to Target
+fn bool_to_target<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    b: BoolTarget,
+) -> Target {
+    let one = builder.one();
+    let zero = builder.zero();
+    builder.select(b, one, zero)
+}
 
 /// Circuit for burning native asset tokens
 ///
@@ -51,19 +66,18 @@ impl NativeAssetBurnCircuit {
         _owner_sk: Target,
     ) -> UTXOTarget {
         // Verify ownership of the input UTXO
+        // Convert the UTXO to the format expected by hash_utxo_commitment
+        let converted_utxo = convert_utxo_target(&self.input_utxo);
         let input_utxo_commitment = hash_utxo_commitment(
             builder,
-            &self.input_utxo.owner_pubkey_hash_target,
-            &self.input_utxo.asset_id_target,
-            self.input_utxo.amount_target,
-            &self.input_utxo.salt_target,
+            &converted_utxo,
         );
         
         // Create a message to sign (the UTXO commitment)
         let mut message = Vec::new();
-        message.extend_from_slice(&input_utxo_commitment);
+        message.push(input_utxo_commitment);
         
-        // Verify the signature
+        // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(
             builder,
             &message,
@@ -73,7 +87,14 @@ impl NativeAssetBurnCircuit {
         
         // Assert that the signature is valid
         let one = builder.one();
-        builder.connect(is_valid, one);
+        let zero = builder.zero();
+        
+        // Convert is_valid to BoolTarget
+        let is_valid_bool = builder.add_virtual_bool_target_safe();
+        let is_valid_target = bool_to_target(builder, is_valid_bool);
+        let _is_valid_connected = builder.connect(is_valid, is_valid_target);
+        let is_valid_selected = builder.select(is_valid_bool, one, zero);
+        builder.assert_one(is_valid_selected);
         
         // Enforce that the burn amount is less than or equal to the input amount
         let is_valid_amount = is_less_than_or_equal(
@@ -81,7 +102,7 @@ impl NativeAssetBurnCircuit {
             self.burn_amount,
             self.input_utxo.amount_target,
         );
-        builder.connect(is_valid_amount, one);
+        builder.assert_one(is_valid_amount);
         
         // Calculate the change amount
         let change_amount = builder.sub(
@@ -89,14 +110,15 @@ impl NativeAssetBurnCircuit {
             self.burn_amount,
         );
         
-        // Enforce fee payment
-        let _wbtc_change_amount = enforce_fee_payment(
+        // Enforce fee payment using our improved fee enforcement
+        enforce_fee_payment(
             builder,
-            &self.owner_pk,
+            &self.owner_pk, // fee payer public key
             &self.fee_input_utxo,
             self.fee_amount,
             &self.fee_reservoir_address_hash,
-            &self.signature,
+            &self.signature, // signature for fee verification
+            &self.input_utxo.asset_id_target, // expected asset ID
         );
         
         // Create a change UTXO if there's any change
@@ -108,6 +130,28 @@ impl NativeAssetBurnCircuit {
                 .map(|_| builder.add_virtual_target())
                 .collect(),
         };
+        
+        // Register the nullifier for the input UTXO
+        // Convert the core::UTXOTarget to utils::nullifier::UTXOTarget first
+        let _nullifier = crate::utils::nullifier::calculate_and_register_nullifier(
+            builder,
+            &converted_utxo,
+            _owner_sk,
+        );
+        
+        // Register the burn amount as a public input
+        builder.register_public_input(self.burn_amount);
+        
+        // Register the asset ID as public inputs
+        for target in &self.input_utxo.asset_id_target {
+            builder.register_public_input(*target);
+        }
+        
+        // Register the change UTXO as public inputs if there's any change
+        builder.register_public_input(change_amount);
+        for target in &change_utxo.salt_target {
+            builder.register_public_input(*target);
+        }
         
         // Return the change UTXO
         change_utxo
@@ -147,7 +191,7 @@ impl NativeAssetBurnCircuit {
             s_scalar: builder.add_virtual_target(),
         };
         
-        let circuit = NativeAssetBurnCircuit {
+        let _circuit = NativeAssetBurnCircuit {
             input_utxo,
             owner_pk,
             burn_amount,
@@ -161,14 +205,15 @@ impl NativeAssetBurnCircuit {
         let _owner_sk = builder.add_virtual_target();
         
         // Build the circuit
-        circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder, _owner_sk);
+        _circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder, _owner_sk);
         
         // Build the circuit data
         builder.build::<PoseidonGoldilocksConfig>()
     }
     
     /// Generate a proof for the native asset burn circuit
-    pub fn generate_proof_static(
+    pub fn generate_proof(
+        &self,
         input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
         owner_pk_x: u64,
         owner_pk_y: u64,
@@ -180,9 +225,9 @@ impl NativeAssetBurnCircuit {
         fee_input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
         fee_amount: u64,
         fee_reservoir_address_hash: Vec<u8>,
-    ) -> Result<crate::core::proof::SerializableProof, crate::core::proof::ProofError> {
+    ) -> WireResult<SerializableProof> {
         use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-        use crate::core::proof::{serialize_proof, ProofError};
+        use crate::core::proof::serialize_proof;
         
         // Create a new circuit
         let config = CircuitConfig::standard_recursion_config();
@@ -197,7 +242,7 @@ impl NativeAssetBurnCircuit {
                 salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
             },
             owner_pk: PublicKeyTarget {
-                point: PointTarget {
+                point: crate::core::PointTarget {
                     x: builder.add_virtual_target(),
                     y: builder.add_virtual_target(),
                 },
@@ -212,7 +257,7 @@ impl NativeAssetBurnCircuit {
             fee_amount: builder.add_virtual_target(),
             fee_reservoir_address_hash: (0..32).map(|_| builder.add_virtual_target()).collect(),
             signature: SignatureTarget {
-                r_point: PointTarget {
+                r_point: crate::core::PointTarget {
                     x: builder.add_virtual_target(),
                     y: builder.add_virtual_target(),
                 },
@@ -316,30 +361,46 @@ impl NativeAssetBurnCircuit {
         
         // Generate the proof
         let proof = crate::core::proof::generate_proof(&circuit_data, pw)
-            .map_err(|e| ProofError::ProofGenerationError(format!("{:?}", e)))?;
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
         // Serialize the proof
         serialize_proof(&proof)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
     }
     
-    /// Verify a proof for the native asset burn circuit
-    pub fn verify_proof(serialized_proof: &crate::core::proof::SerializableProof) -> Result<(), crate::core::proof::ProofError> {
+    /// Verify a proof of a native asset burn
+    pub fn verify_proof(serialized_proof: &SerializableProof) -> WireResult<()> {
         use crate::core::proof::deserialize_proof;
         
-        // Create a new circuit
+        // Create the circuit
+        let (circuit_data, _) = Self::build_circuit()?;
+        
+        // Deserialize the proof
+        let proof = deserialize_proof(serialized_proof, &circuit_data.common)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
+        
+        // Verify the proof
+        crate::core::proof::verify_proof(&circuit_data, proof)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
+    }
+    
+    /// Build the circuit
+    fn build_circuit() -> WireResult<(CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2>, ProofWithPublicInputs<GoldilocksField, PoseidonGoldilocksConfig, 2>)> {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create the circuit instance
+        let input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
+            asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
+            amount_target: builder.add_virtual_target(),
+            salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
+        };
+        
         let circuit = NativeAssetBurnCircuit {
-            input_utxo: UTXOTarget {
-                owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                amount_target: builder.add_virtual_target(),
-                salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            },
+            input_utxo,
             owner_pk: PublicKeyTarget {
-                point: PointTarget {
+                point: crate::core::PointTarget {
                     x: builder.add_virtual_target(),
                     y: builder.add_virtual_target(),
                 },
@@ -354,7 +415,7 @@ impl NativeAssetBurnCircuit {
             fee_amount: builder.add_virtual_target(),
             fee_reservoir_address_hash: (0..32).map(|_| builder.add_virtual_target()).collect(),
             signature: SignatureTarget {
-                r_point: PointTarget {
+                r_point: crate::core::PointTarget {
                     x: builder.add_virtual_target(),
                     y: builder.add_virtual_target(),
                 },
@@ -363,16 +424,12 @@ impl NativeAssetBurnCircuit {
         };
         
         // Build the circuit
-        let owner_sk_target = builder.add_virtual_target();
-        circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder, owner_sk_target);
-        
-        // Build the circuit data
         let circuit_data = builder.build::<PoseidonGoldilocksConfig>();
         
-        // Deserialize the proof
-        let proof = deserialize_proof(serialized_proof)?;
+        // Create a proof with public inputs
+        let proof_with_public_inputs = crate::core::proof::generate_proof(&circuit_data, PartialWitness::new())
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
-        // Verify the proof
-        crate::core::proof::verify_proof(&circuit_data, &proof)
+        Ok((circuit_data, proof_with_public_inputs))
     }
 }

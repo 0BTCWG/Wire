@@ -8,6 +8,7 @@ pub mod parallel_prover;
 pub mod signature;
 pub mod merkle;
 pub mod nullifier;
+pub mod wallet;
 // Temporarily disable the memory_efficient module to focus on fixing core functionality
 // pub mod memory_efficient;
 

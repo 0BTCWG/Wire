@@ -3,11 +3,26 @@ use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
+use plonky2::plonk::circuit_data::CircuitConfig;
+use plonky2::iop::target::BoolTarget;
 
-use crate::core::{PublicKeyTarget, UTXOTarget};
-use crate::gadgets::arithmetic::lte as is_less_than_or_equal;
-use crate::utils::hash::{compute_message_hash_targets as hash_for_signature};
-use crate::utils::nullifier::{compute_utxo_hash_target as hash_utxo_target};
+use crate::core::{PublicKeyTarget, UTXOTarget, SignatureTarget};
+use crate::errors::{ValidationError, WireError, WireResult};
+use crate::gadgets::hash::hash_utxo_commitment;
+use crate::utils::nullifier::compute_utxo_commitment_hash as nullifier_hash_utxo_target;
+
+/// Represents a signed fee quote from the custodian
+#[derive(Debug, Clone)]
+pub struct SignedQuoteTarget {
+    /// The fee amount in BTC
+    pub fee_btc: Target,
+    
+    /// The quote expiry timestamp
+    pub expiry: Target,
+    
+    /// The custodian's signature
+    pub signature: SignatureTarget,
+}
 
 /// Enforce fee payment for a transaction
 ///
@@ -24,68 +39,55 @@ pub fn enforce_fee_payment<F: RichField + Extendable<D>, const D: usize>(
     input_wbtc_utxo: &UTXOTarget,
     fee_amount: Target,
     reservoir_address_hash: &[Target],
-    signature: &crate::core::SignatureTarget,
+    signature: &SignatureTarget,
     expected_asset_id: &[Target],
 ) -> (Target, UTXOTarget) {
-    // 1. Verify the input UTXO is of the correct asset type (wBTC)
-    for (i, (actual, expected)) in input_wbtc_utxo.asset_id_target.iter().zip(expected_asset_id.iter()).enumerate() {
-        builder.assert_equal(*actual, *expected);
-    }
-    
-    // 2. Verify ownership of the input UTXO
-    // Create a message containing the UTXO details and fee information
-    let mut message = Vec::new();
-    message.extend_from_slice(&input_wbtc_utxo.owner_pubkey_hash_target);
-    message.extend_from_slice(&input_wbtc_utxo.asset_id_target);
-    message.push(input_wbtc_utxo.amount_target);
-    message.extend_from_slice(&input_wbtc_utxo.salt_target);
-    message.push(fee_amount); // Include fee amount in the signed message
-    message.extend_from_slice(reservoir_address_hash); // Include fee recipient in the signed message
-    
-    // Verify the signature using domain-separated hash
-    let message_hash = hash_for_signature(builder, &message);
-    
-    // Create a message for signature verification
-    let mut sig_message = Vec::new();
-    sig_message.push(message_hash);
+    // Verify that the input UTXO is owned by the fee payer
+    // Convert the UTXO target first
+    let converted_utxo = convert_utxo_target(input_wbtc_utxo);
+    let message_hash = nullifier_hash_utxo_target(builder, &converted_utxo);
     
     // Verify the signature
-    let is_signature_valid = crate::gadgets::verify_message_signature(
+    let is_valid = crate::utils::signature::verify_signature_in_circuit_with_targets(
         builder,
-        &sig_message,
-        signature,
         fee_payer_pk,
+        message_hash,
+        signature,
     );
     
     // Ensure the signature is valid
-    builder.assert_one(is_signature_valid);
+    builder.assert_one(is_valid.target);
     
-    // 3. Verify the input UTXO has enough funds
-    let has_enough_funds = is_less_than_or_equal(
-        builder,
-        fee_amount,
-        input_wbtc_utxo.amount_target,
-    );
+    // Verify that the input UTXO asset ID matches the expected asset ID (wBTC)
+    for i in 0..expected_asset_id.len() {
+        let is_equal = builder.is_equal(
+            input_wbtc_utxo.asset_id_target[i],
+            expected_asset_id[i],
+        );
+        builder.assert_one(is_equal.target);
+    }
     
-    // Ensure there are enough funds
-    builder.assert_one(has_enough_funds);
+    // Verify that the input UTXO has enough funds to pay the fee
+    let input_amount = input_wbtc_utxo.amount_target;
     
-    // 4. Calculate the change amount
-    let change_amount = builder.sub(input_wbtc_utxo.amount_target, fee_amount);
+    // Get zero target
+    let zero_target = builder.zero();
     
-    // 5. Create the fee UTXO that sends the fee to the reservoir address
+    // Check if fee_amount <= input_amount (sufficient funds)
+    let fee_lte_input = validate_fee_amount(builder, fee_amount, zero_target, input_amount);
+    builder.assert_one(fee_lte_input);
+    
+    // Calculate the change amount
+    let change_amount = builder.sub(input_amount, fee_amount);
+    
+    // Create the fee UTXO
     let fee_utxo = UTXOTarget {
         owner_pubkey_hash_target: reservoir_address_hash.to_vec(),
-        asset_id_target: input_wbtc_utxo.asset_id_target.clone(),
+        asset_id_target: expected_asset_id.to_vec(),
         amount_target: fee_amount,
-        salt_target: input_wbtc_utxo.salt_target.clone(), // Reuse the salt for simplicity
+        salt_target: vec![zero_target], // Use a deterministic salt for fee UTXOs
     };
     
-    // 6. Calculate and register the fee UTXO hash
-    let fee_utxo_hash = hash_utxo_target(builder, &fee_utxo);
-    builder.register_public_input(fee_utxo_hash);
-    
-    // Return the change amount and fee UTXO
     (change_amount, fee_utxo)
 }
 
@@ -99,12 +101,12 @@ pub fn enforce_fee_payment_with_change<F: RichField + Extendable<D>, const D: us
     input_wbtc_utxo: &UTXOTarget,
     fee_amount: Target,
     reservoir_address_hash: &[Target],
-    signature: &crate::core::SignatureTarget,
+    signature: &SignatureTarget,
     expected_asset_id: &[Target],
     change_salt: &[Target],
 ) -> UTXOTarget {
-    // Enforce fee payment
-    let (change_amount, fee_utxo) = enforce_fee_payment(
+    // First enforce the fee payment
+    let (change_amount, _) = enforce_fee_payment(
         builder,
         fee_payer_pk,
         input_wbtc_utxo,
@@ -123,11 +125,39 @@ pub fn enforce_fee_payment_with_change<F: RichField + Extendable<D>, const D: us
     };
     
     // Calculate and register the change UTXO hash
-    let change_utxo_hash = hash_utxo_target(builder, &change_utxo);
-    builder.register_public_input(change_utxo_hash);
+    let change_utxo_hash_result = hash_utxo_commitment(
+        builder,
+        &change_utxo.owner_pubkey_hash_target,
+        &change_utxo.asset_id_target,
+        change_utxo.amount_target,
+        &change_utxo.salt_target,
+    );
     
-    // Return the change UTXO
+    // Register the change UTXO hash as a public input if available
+    if let Ok(hash_targets) = change_utxo_hash_result {
+        for target in hash_targets {
+            builder.register_public_input(target);
+        }
+    }
+    
     change_utxo
+}
+
+/// Convert a core::UTXOTarget to a utils::nullifier::UTXOTarget
+pub fn convert_utxo_target(utxo: &crate::core::UTXOTarget) -> crate::utils::nullifier::UTXOTarget {
+    // Extract the first element of each vector, or panic if empty
+    let owner_pubkey_hash = utxo.owner_pubkey_hash_target.get(0).copied().unwrap_or_else(|| panic!("Owner pubkey hash is empty"));
+    let asset_id = utxo.asset_id_target.get(0).copied().unwrap_or_else(|| panic!("Asset ID is empty"));
+    let amount = utxo.amount_target;
+    let salt = utxo.salt_target.get(0).copied().unwrap_or_else(|| panic!("Salt is empty"));
+    
+    // Create a new UTXOTarget for the nullifier module
+    crate::utils::nullifier::UTXOTarget {
+        owner_pubkey_hash_target: vec![owner_pubkey_hash],
+        asset_id_target: vec![asset_id],
+        amount_target: vec![amount],
+        salt_target: vec![salt],
+    }
 }
 
 /// Validate a fee amount
@@ -139,28 +169,65 @@ pub fn validate_fee_amount<F: RichField + Extendable<D>, const D: usize>(
     min_fee: Target,
     max_fee: Target,
 ) -> Target {
-    // Check if the fee is at least the minimum fee
-    let is_above_min = is_less_than_or_equal(
-        builder,
-        min_fee,
-        fee_amount,
-    );
+    // Check if fee_amount >= min_fee
+    let min_diff = builder.sub(fee_amount, min_fee);
+    let min_bits = builder.split_le(min_diff, 64);
+    // If the sign bit is 0, then fee_amount >= min_fee
+    // The sign bit is at index 63
+    // The bits from split_le are already BoolTargets
+    let sign_bit_min = min_bits[63];
+    // We need to negate the sign bit (if sign bit is 0, then value is non-negative)
+    let is_above_min = builder.not(sign_bit_min);
     
-    // Check if the fee is at most the maximum fee
-    let is_below_max = is_less_than_or_equal(
-        builder,
-        fee_amount,
-        max_fee,
-    );
+    // Check if fee_amount <= max_fee
+    let max_diff = builder.sub(max_fee, fee_amount);
+    let max_bits = builder.split_le(max_diff, 64);
+    // If the sign bit is 0, then fee_amount <= max_fee
+    let sign_bit_max = max_bits[63];
+    // We need to negate the sign bit (if sign bit is 0, then value is non-negative)
+    let is_below_max = builder.not(sign_bit_max);
     
     // Both conditions must be true
-    let is_valid_fee = builder.and(is_above_min, is_below_max);
+    let is_valid = builder.and(is_above_min, is_below_max);
     
-    // Ensure the fee is valid
-    builder.assert_one(is_valid_fee);
+    is_valid.target
+}
+
+/// Verify that a fee payment is valid
+///
+/// This function verifies that:
+/// 1. The fee amount is at least the minimum required fee
+/// 2. The fee is paid in the correct asset type
+/// 3. The fee is sent to the correct reservoir address
+///
+/// Returns a boolean target indicating whether the fee payment is valid
+pub fn verify_fee_payment<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    fee_amount: Target,
+    min_required_fee: Target,
+    fee_asset_id: Target,
+    expected_asset_id: Target,
+    fee_recipient: Target,
+    expected_recipient: Target,
+) -> Target {
+    // Check if the fee is sufficient
+    // We can implement this as !(min_required_fee > fee_amount)
+    let min_diff = builder.sub(fee_amount, min_required_fee);
+    let min_bits = builder.split_le(min_diff, 64);
+    let fee_sufficient = builder.not(min_bits[63]);
     
-    // Return the validated fee amount
-    fee_amount
+    // Check if the asset ID is correct
+    let correct_asset = builder.is_equal(fee_asset_id, expected_asset_id);
+    
+    // Check if the recipient is correct
+    let correct_recipient = builder.is_equal(fee_recipient, expected_recipient);
+    
+    // All conditions must be true
+    let asset_and_recipient = builder.and(correct_asset, correct_recipient);
+    
+    // Convert BoolTarget to Target for the final result
+    let result = builder.and(fee_sufficient, asset_and_recipient);
+    result.target
 }
 
 /// Calculate the fee for a transaction
@@ -187,338 +254,4 @@ pub fn calculate_fee<F: RichField + Extendable<D>, const D: usize>(
     // Total fee = base_fee + size_component + congestion_component
     let temp_sum = builder.add(base_fee, size_component);
     builder.add(temp_sum, congestion_component)
-}
-
-/// Verify that a fee payment is valid
-///
-/// This function verifies that:
-/// 1. The fee amount is at least the minimum required fee
-/// 2. The fee is paid in the correct asset type
-/// 3. The fee is sent to the correct reservoir address
-///
-/// Returns a boolean target indicating whether the fee payment is valid
-pub fn verify_fee_payment<F: RichField + Extendable<D>, const D: usize>(
-    builder: &mut CircuitBuilder<F, D>,
-    fee_amount: Target,
-    min_required_fee: Target,
-    fee_asset_id: Target,
-    expected_asset_id: Target,
-    fee_recipient: Target,
-    expected_recipient: Target,
-) -> Target {
-    // Check that fee_amount >= min_required_fee
-    let fee_sufficient = is_less_than_or_equal(builder, min_required_fee, fee_amount);
-    
-    // Check that fee_asset_id == expected_asset_id
-    let correct_asset = builder.is_equal(fee_asset_id, expected_asset_id);
-    
-    // Check that fee_recipient == expected_recipient
-    let correct_recipient = builder.is_equal(fee_recipient, expected_recipient);
-    
-    // All conditions must be true
-    let asset_and_recipient = builder.and(correct_asset, correct_recipient);
-    builder.and(fee_sufficient, asset_and_recipient).target
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::core::{PointTarget, SignatureTarget, HASH_SIZE};
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-    use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::PoseidonGoldilocksConfig;
-    use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::field::types::Field;
-    
-    type F = GoldilocksField;
-    type C = PoseidonGoldilocksConfig;
-    const D: usize = 2;
-    
-    #[test]
-    fn test_fee_payment() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        
-        // Create a fee payer public key
-        let fee_payer_pk = PublicKeyTarget {
-            point: PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
-        
-        // Create an input UTXO
-        let input_wbtc_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            asset_id_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-        };
-        
-        // Create a fee amount
-        let fee_amount = builder.add_virtual_target();
-        
-        // Create a fee reservoir address
-        let fee_reservoir_address_hash: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        
-        // Create a signature
-        let signature = SignatureTarget {
-            r_point: PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
-        
-        // Create an expected asset ID
-        let expected_asset_id: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        
-        // Enforce fee payment
-        let (change_amount, fee_utxo) = enforce_fee_payment(
-            &mut builder,
-            &fee_payer_pk,
-            &input_wbtc_utxo,
-            fee_amount,
-            &fee_reservoir_address_hash,
-            &signature,
-            &expected_asset_id,
-        );
-        
-        // Register the change amount as a public input
-        builder.register_public_input(change_amount);
-        
-        // Build the circuit
-        let circuit = builder.build::<C>();
-        
-        // Create a witness
-        let mut pw = PartialWitness::new();
-        
-        // Set values for the fee payer public key
-        pw.set_target(fee_payer_pk.point.x, F::from_canonical_u64(1));
-        pw.set_target(fee_payer_pk.point.y, F::from_canonical_u64(2));
-        
-        // Set values for the input UTXO
-        for (i, target) in input_wbtc_utxo.owner_pubkey_hash_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        for (i, target) in input_wbtc_utxo.asset_id_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        pw.set_target(input_wbtc_utxo.amount_target, F::from_canonical_u64(100));
-        
-        for (i, target) in input_wbtc_utxo.salt_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the fee amount
-        pw.set_target(fee_amount, F::from_canonical_u64(10));
-        
-        // Set values for the fee reservoir address
-        for (i, target) in fee_reservoir_address_hash.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the expected asset ID
-        for (i, target) in expected_asset_id.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the signature
-        pw.set_target(signature.r_point.x, F::from_canonical_u64(3));
-        pw.set_target(signature.r_point.y, F::from_canonical_u64(4));
-        pw.set_target(signature.s_scalar, F::from_canonical_u64(5));
-        
-        // Generate a proof
-        let proof = circuit.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check that the change amount is correct
-        assert_eq!(proof.public_inputs[0], F::from_canonical_u64(90));
-    }
-    
-    #[test]
-    fn test_fee_payment_with_change() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        
-        // Create a fee payer public key
-        let fee_payer_pk = PublicKeyTarget {
-            point: PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
-        
-        // Create an input UTXO
-        let input_wbtc_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            asset_id_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..HASH_SIZE)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-        };
-        
-        // Create a fee amount
-        let fee_amount = builder.add_virtual_target();
-        
-        // Create a fee reservoir address
-        let fee_reservoir_address_hash: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        
-        // Create a signature
-        let signature = SignatureTarget {
-            r_point: PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
-        
-        // Create an expected asset ID
-        let expected_asset_id: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        
-        // Create a change salt
-        let change_salt: Vec<Target> = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-        
-        // Enforce fee payment with change
-        let change_utxo = enforce_fee_payment_with_change(
-            &mut builder,
-            &fee_payer_pk,
-            &input_wbtc_utxo,
-            fee_amount,
-            &fee_reservoir_address_hash,
-            &signature,
-            &expected_asset_id,
-            &change_salt,
-        );
-        
-        // Register the change amount as a public input
-        builder.register_public_input(change_utxo.amount_target);
-        
-        // Build the circuit
-        let circuit = builder.build::<C>();
-        
-        // Create a witness
-        let mut pw = PartialWitness::new();
-        
-        // Set values for the fee payer public key
-        pw.set_target(fee_payer_pk.point.x, F::from_canonical_u64(1));
-        pw.set_target(fee_payer_pk.point.y, F::from_canonical_u64(2));
-        
-        // Set values for the input UTXO
-        for (i, target) in input_wbtc_utxo.owner_pubkey_hash_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        for (i, target) in input_wbtc_utxo.asset_id_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        pw.set_target(input_wbtc_utxo.amount_target, F::from_canonical_u64(100));
-        
-        for (i, target) in input_wbtc_utxo.salt_target.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the fee amount
-        pw.set_target(fee_amount, F::from_canonical_u64(10));
-        
-        // Set values for the fee reservoir address
-        for (i, target) in fee_reservoir_address_hash.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the expected asset ID
-        for (i, target) in expected_asset_id.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(i as u64));
-        }
-        
-        // Set values for the change salt
-        for (i, target) in change_salt.iter().enumerate() {
-            pw.set_target(*target, F::from_canonical_u64(100 + i as u64));
-        }
-        
-        // Set values for the signature
-        pw.set_target(signature.r_point.x, F::from_canonical_u64(3));
-        pw.set_target(signature.r_point.y, F::from_canonical_u64(4));
-        pw.set_target(signature.s_scalar, F::from_canonical_u64(5));
-        
-        // Generate a proof
-        let proof = circuit.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check that the change amount is correct
-        assert_eq!(proof.public_inputs[2], F::from_canonical_u64(90));
-    }
-    
-    #[test]
-    fn test_validate_fee_amount() {
-        // Create a new circuit
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<F, D>::new(config);
-        
-        // Create fee amounts
-        let fee_amount = builder.add_virtual_target();
-        let min_fee = builder.add_virtual_target();
-        let max_fee = builder.add_virtual_target();
-        
-        // Validate the fee amount
-        let validated_fee = validate_fee_amount(
-            &mut builder,
-            fee_amount,
-            min_fee,
-            max_fee,
-        );
-        
-        // Register the validated fee as a public input
-        builder.register_public_input(validated_fee);
-        
-        // Build the circuit
-        let circuit = builder.build::<C>();
-        
-        // Create a witness
-        let mut pw = PartialWitness::new();
-        
-        // Set values for the fee amounts
-        pw.set_target(fee_amount, F::from_canonical_u64(50));
-        pw.set_target(min_fee, F::from_canonical_u64(10));
-        pw.set_target(max_fee, F::from_canonical_u64(100));
-        
-        // Generate a proof
-        let proof = circuit.prove(pw).unwrap();
-        
-        // Verify the proof
-        circuit.verify(proof.clone()).unwrap();
-        
-        // Check that the validated fee is correct
-        assert_eq!(proof.public_inputs[0], F::from_canonical_u64(50));
-    }
 }

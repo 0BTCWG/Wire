@@ -1,20 +1,18 @@
 // Wrapped Asset Mint Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData, CommonCircuitData};
-use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
-use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
-use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
+use crate::core::proof::{serialize_proof, SerializableProof};
+use crate::errors::{WireError, ProofError, WireResult};
 use crate::gadgets::verify_message_signature;
-use crate::errors::{WireError, WireResult};
 
 /// Represents a signed attestation from a custodian
 #[derive(Clone)]
@@ -57,6 +55,7 @@ impl WrappedAssetMintCircuit {
         message.push(self.attestation.amount);
         message.push(self.attestation.deposit_nonce);
         
+        // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(
             builder,
             &message,
@@ -135,13 +134,13 @@ impl WrappedAssetMintCircuit {
         };
         
         // Create the circuit
-        let circuit = WrappedAssetMintCircuit {
+        let _circuit = WrappedAssetMintCircuit {
             custodian_pk,
             attestation,
         };
         
         // Build the circuit
-        circuit.build(&mut builder);
+        _circuit.build(&mut builder);
         
         // Build the circuit data
         builder.build()
@@ -230,18 +229,18 @@ impl WrappedAssetMintCircuit {
         
         // Generate the proof
         let proof = circuit_data.prove(pw)
-            .map_err(|e| WireError::ProofError(ProofError::ProofGenerationError(format!("Failed to generate proof: {}", e))))?;
+            .map_err(|e| WireError::ProofError(ProofError::GenerationError(format!("Failed to generate proof: {}", e))))?;
         
         // Serialize the proof
         serialize_proof(&proof)
-            .map_err(|e| WireError::ProofError(e))
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
     }
     
     /// Verify a proof for the circuit
     pub fn verify_proof(serializable_proof: &SerializableProof) -> WireResult<()> {
         let circuit_data = Self::create_circuit();
         let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
-            .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to deserialize proof: {}", e))))?;
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
         circuit_data.verify(proof)
             .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to verify proof: {}", e))))

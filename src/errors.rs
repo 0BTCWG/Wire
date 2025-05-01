@@ -213,6 +213,17 @@ impl fmt::Display for ProofError {
     }
 }
 
+impl From<crate::core::proof::ProofError> for ProofError {
+    fn from(error: crate::core::proof::ProofError) -> Self {
+        match error {
+            crate::core::proof::ProofError::ProofGenerationError(msg) => ProofError::GenerationError(msg),
+            crate::core::proof::ProofError::VerificationError(msg) => ProofError::VerificationError(msg),
+            crate::core::proof::ProofError::SerializationError(msg) => ProofError::SerializationError(msg),
+            crate::core::proof::ProofError::DeserializationError(msg) => ProofError::DeserializationError(msg),
+        }
+    }
+}
+
 /// Validation error types
 #[derive(Debug)]
 pub enum ValidationError {
@@ -231,6 +242,9 @@ pub enum ValidationError {
     // Invalid format errors
     InvalidFormat(String),
     
+    // Input validation errors
+    InputValidationError(String),
+    
     // Security violation errors
     SecurityViolation(String),
 }
@@ -243,6 +257,7 @@ impl fmt::Display for ValidationError {
             ValidationError::InvalidValue(e) => write!(f, "Invalid value: {}", e),
             ValidationError::InvalidLength(e) => write!(f, "Invalid length: {}", e),
             ValidationError::InvalidFormat(e) => write!(f, "Invalid format: {}", e),
+            ValidationError::InputValidationError(e) => write!(f, "Input validation error: {}", e),
             ValidationError::SecurityViolation(e) => write!(f, "Security violation: {}", e),
         }
     }
@@ -280,6 +295,7 @@ pub fn sanitize_error_message(error: &WireError) -> String {
             ValidationError::InvalidValue(field) => format!("Invalid value for field: {}", field),
             ValidationError::InvalidLength(field) => format!("Invalid length for field: {}", field),
             ValidationError::InvalidFormat(field) => format!("Invalid format for field: {}", field),
+            ValidationError::InputValidationError(field) => format!("Input validation error for field: {}", field),
             ValidationError::SecurityViolation(_) => "Security violation detected".to_string(),
         },
         

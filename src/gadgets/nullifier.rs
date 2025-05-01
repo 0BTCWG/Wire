@@ -4,7 +4,7 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::utils::hash::{compute_nullifier_targets as hash_for_nullifier};
+use crate::utils::hash::{compute_nullifier_targets};
 use crate::errors::{WireError, CryptoError, WireResult};
 
 /// Calculate a nullifier for a UTXO with domain separation
@@ -57,7 +57,7 @@ pub fn calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
     inputs.push(derived_key);
     
     // Use the domain-separated hash function for nullifiers
-    hash_for_nullifier(builder, &inputs)
+    Ok(hash_for_nullifier(builder, &inputs))
 }
 
 /// Derive a key specifically for nullifier calculation
@@ -83,7 +83,7 @@ fn derive_nullifier_key<F: RichField + Extendable<D>, const D: usize>(
     inputs.push(owner_sk);
     
     // Hash the combined input with domain separation
-    hash_for_nullifier(builder, &inputs)
+    Ok(hash_for_nullifier(builder, &inputs))
 }
 
 /// Calculate and register a nullifier for a UTXO
@@ -158,7 +158,7 @@ pub fn calculate_nullifier_with_randomness<F: RichField + Extendable<D>, const D
     inputs.push(randomness); // Add randomness for enhanced privacy
     
     // Use the domain-separated hash function for nullifiers
-    hash_for_nullifier(builder, &inputs)
+    Ok(hash_for_nullifier(builder, &inputs))
 }
 
 /// Legacy nullifier calculation for backward compatibility
@@ -190,7 +190,23 @@ pub fn legacy_calculate_nullifier<F: RichField + Extendable<D>, const D: usize>(
     inputs.push(owner_sk);
     
     // Use the domain-separated hash function for nullifiers
-    hash_for_nullifier(builder, &inputs)
+    Ok(hash_for_nullifier(builder, &inputs))
+}
+
+// Wrapper function to adapt the compute_nullifier_targets function to our needs
+fn hash_for_nullifier<F: RichField + Extendable<D>, const D: usize>(
+    builder: &mut CircuitBuilder<F, D>,
+    inputs: &[Target],
+) -> Target {
+    // We need at least 4 inputs for the nullifier calculation
+    // If we don't have enough, we'll use zeros for the missing ones
+    let owner_pubkey_hash = inputs.get(0).copied().unwrap_or_else(|| builder.zero());
+    let asset_id = inputs.get(1).copied().unwrap_or_else(|| builder.zero());
+    let amount = inputs.get(2).copied().unwrap_or_else(|| builder.zero());
+    let salt = inputs.get(3).copied().unwrap_or_else(|| builder.zero());
+    
+    // Call the actual compute_nullifier_targets function
+    compute_nullifier_targets(builder, owner_pubkey_hash, asset_id, amount, salt)
 }
 
 #[cfg(test)]
@@ -212,8 +228,8 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
         // Create test inputs
-        let salt_values = [F::ONE, F::TWO, F::THREE];
-        let asset_id_values = [F::FOUR, F::FIVE];
+        let salt_values = [F::from_canonical_u64(1), F::from_canonical_u64(2), F::from_canonical_u64(3)];
+        let asset_id_values = [F::from_canonical_u64(4), F::from_canonical_u64(5)];
         let amount_value = F::from_canonical_u64(1000);
         let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
         
@@ -247,7 +263,7 @@ mod tests {
         let circuit = builder.build::<C>();
         
         // Create a witness
-        let mut pw = PartialWitness::new();
+        let pw = PartialWitness::new();
         
         // Generate a proof
         let proof = circuit.prove(pw).expect("Proving should not fail");
@@ -262,8 +278,8 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
         // Create test inputs
-        let salt_values = [F::ONE, F::TWO, F::THREE];
-        let asset_id_values = [F::FOUR, F::FIVE];
+        let salt_values = [F::from_canonical_u64(1), F::from_canonical_u64(2), F::from_canonical_u64(3)];
+        let asset_id_values = [F::from_canonical_u64(4), F::from_canonical_u64(5)];
         let amount_value = F::from_canonical_u64(1000);
         let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
         let randomness_value = F::from_canonical_u64(0x9876543210fedcba);
@@ -300,7 +316,7 @@ mod tests {
         let circuit = builder.build::<C>();
         
         // Create a witness
-        let mut pw = PartialWitness::new();
+        let pw = PartialWitness::new();
         
         // Generate a proof
         let proof = circuit.prove(pw).expect("Proving should not fail");
@@ -315,7 +331,7 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
         // Create test input
-        let owner_sk_value = F::from_canonical_u64(0x1234567890abcdef);
+        let owner_sk_value = F::from_canonical_u64(3);
         let owner_sk_target = builder.constant(owner_sk_value);
         
         // Derive the key
@@ -329,7 +345,7 @@ mod tests {
         let circuit = builder.build::<C>();
         
         // Create a witness
-        let mut pw = PartialWitness::new();
+        let pw = PartialWitness::new();
         
         // Generate a proof
         let proof = circuit.prove(pw).expect("Proving should not fail");
@@ -347,9 +363,9 @@ mod tests {
         let salt_targets = Vec::new();
         
         // Create other valid inputs
-        let asset_id_targets = vec![builder.constant(F::ONE)];
-        let amount_target = builder.constant(F::TWO);
-        let owner_sk_target = builder.constant(F::THREE);
+        let asset_id_targets = vec![builder.constant(F::from_canonical_u64(4))];
+        let amount_target = builder.constant(F::from_canonical_u64(2));
+        let owner_sk_target = builder.constant(F::from_canonical_u64(3));
         
         // Calculate the nullifier - should return an error
         let result = calculate_nullifier(
@@ -375,14 +391,14 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
         
         // Create valid salt
-        let salt_targets = vec![builder.constant(F::ONE)];
+        let salt_targets = vec![builder.constant(F::from_canonical_u64(1))];
         
         // Create empty asset ID
         let asset_id_targets = Vec::new();
         
         // Create other valid inputs
-        let amount_target = builder.constant(F::TWO);
-        let owner_sk_target = builder.constant(F::THREE);
+        let amount_target = builder.constant(F::from_canonical_u64(2));
+        let owner_sk_target = builder.constant(F::from_canonical_u64(3));
         
         // Calculate the nullifier - should return an error
         let result = calculate_nullifier(
@@ -414,9 +430,9 @@ mod tests {
         }
         
         // Create other valid inputs
-        let asset_id_targets = vec![builder.constant(F::ONE)];
-        let amount_target = builder.constant(F::TWO);
-        let owner_sk_target = builder.constant(F::THREE);
+        let asset_id_targets = vec![builder.constant(F::from_canonical_u64(4))];
+        let amount_target = builder.constant(F::from_canonical_u64(2));
+        let owner_sk_target = builder.constant(F::from_canonical_u64(3));
         
         // Calculate the nullifier - should return an error
         let result = calculate_nullifier(

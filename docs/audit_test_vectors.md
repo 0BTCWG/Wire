@@ -184,6 +184,59 @@ Each test vector is provided in JSON format with the following structure:
 - [ ] Batch hashing with different batch sizes
 - [ ] Vector operations with varying vector lengths
 
+## Using the `generate_audit_test_vectors` Binary
+
+The `generate_audit_test_vectors` binary is a tool for generating test vectors that can be used for auditing the 0BTC Wire project. It creates deterministic proofs for wrapped asset mint, wrapped asset burn, and transfer operations.
+
+### Usage
+
+```bash
+cargo run --release --bin generate_audit_test_vectors -- --output-dir <OUTPUT_DIRECTORY>
+```
+
+Where `<OUTPUT_DIRECTORY>` is the directory where the test vectors will be saved.
+
+### Implementation Details
+
+The binary has been modernized to use the latest public APIs for all circuit operations:
+
+1. **Wrapped Asset Mint Circuit**
+   - Uses `WrappedAssetMintCircuit::generate_proof_static` with explicit byte conversion for all inputs
+   - Handles fee quotes and custodian public keys properly
+   - Uses only public, stable APIs for all cryptographic operations
+
+2. **Wrapped Asset Burn Circuit**
+   - Uses `WrappedAssetBurnCircuit::generate_proof_static` with explicit byte conversion
+   - Properly formats BTC addresses and handles optional fee parameters
+   - Ensures all witness assignments are explicit and auditable
+
+3. **Transfer Circuit**
+   - Uses `TransferCircuit::new()` followed by the instance method `generate_proof()`
+   - Constructs all inputs with proper byte ordering and domain separation
+   - Handles nullifier generation with proper randomness
+
+4. **Utility Functions**
+   - Added helper functions for consistent byte conversion (e.g., `u64_to_le_bytes`)
+   - Ensures all integer literals are within valid u64 range
+   - Properly handles errors with explicit error reporting
+
+### Recent Improvements
+
+- Fixed all witness assignment conflicts in test vector generation
+- Ensured deterministic inputs for reproducible proof generation
+- Updated to use the latest clap API for command-line argument parsing
+- Added proper error handling for all proof generation steps
+- Improved memory efficiency by avoiding unnecessary cloning
+- Ensured all cryptographic operations use only public, stable APIs
+- Fixed type safety issues with proper Target and BoolTarget handling
+
+### Notes on Test Vector Generation
+
+- All proofs are generated with deterministic inputs for reproducibility
+- The binary handles errors gracefully and reports any proof generation failures
+- Test vectors include both the inputs and the resulting proof (if successful)
+- All cryptographic operations are explicit and auditable
+
 ## Instructions for Running Test Vectors
 
 ### Prerequisites

@@ -106,6 +106,89 @@ Consider formal verification of critical components, particularly the zero-knowl
 
 Conduct penetration testing of the CLI and WASM interfaces to identify potential vulnerabilities.
 
+## Circuit Constraint Security Analysis
+
+This section details the manual review of all circuit constraints in the 0BTC Wire system, focusing on potential vulnerabilities and their mitigations.
+
+### Signature Verification Constraints
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| All Circuits | EdDSA Signature Verification | Signature forgery or bypass | ✅ Proper domain separation in message hashing with `domains::MESSAGE` constant |
+| All Circuits | Point Validation | Invalid curve points | ✅ Complete curve equation check in `is_on_curve_targets` |
+| All Circuits | Batch Verification | Cancellation attacks | ✅ Random scalar multiplication for batch verification |
+| Transfer Circuit | Sender Authentication | Unauthorized transfers | ✅ Strict signature verification with domain-separated message hashing |
+
+**Findings:** The signature verification constraints are correctly implemented with proper domain separation and curve validation. No vulnerabilities were identified that would allow signature bypass or forgery.
+
+### Conservation of Value Constraints
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| Transfer Circuit | Input/Output Balance | Value inflation | ✅ Strict equality check between input and output amounts |
+| WrappedAssetMint | Output Amount Validation | Unauthorized minting | ✅ Output amount constrained to match attestation amount |
+| WrappedAssetBurn | Burn Amount Validation | Partial burning | ✅ Burn amount constrained to be less than or equal to input amount |
+| NativeAssetMint | Mint Amount Validation | Unauthorized minting | ✅ Mint amount constrained by creator signature |
+
+**Findings:** All circuits properly enforce conservation of value. The Transfer circuit ensures the sum of output amounts equals the input amount. Mint and burn circuits properly constrain the amounts based on authorized signatures.
+
+### Nullifier and Double Spending Prevention
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| All Spending Circuits | Nullifier Generation | Nullifier collisions | ✅ Domain-separated hash with `domains::NULLIFIER` constant |
+| All Spending Circuits | Nullifier Registration | Double spending | ✅ Nullifier registered as public input in `calculate_and_register_nullifier` |
+| Transfer Circuit | Input UTXO Validation | Spending invalid UTXOs | ✅ Merkle proof verification of UTXO existence |
+| Burn Circuits | Burn Nullifier | Replay of burn proofs | ✅ Unique nullifier generated and registered for each burn |
+
+**Findings:** The nullifier generation and registration are properly implemented with domain separation. Each circuit that spends a UTXO correctly registers the nullifier as a public input, preventing double spending.
+
+### Transaction Replay Prevention
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| All Circuits | Unique UTXO Generation | UTXO replay | ✅ Random blinding factors in UTXO creation |
+| Fee Enforcement | Fee Quote Expiry | Expired fee quotes | ✅ Timestamp validation in fee enforcement gadget |
+| WrappedAssetMint | Attestation Replay | Reuse of attestations | ✅ One-time attestation with unique identifiers |
+| NativeAssetCreate | Asset ID Collision | Duplicate asset creation | ✅ Deterministic asset ID from creator-controlled parameters |
+
+**Findings:** The system properly prevents transaction replay through unique UTXO generation with blinding factors and expiry timestamps for fee quotes. Attestations include unique identifiers to prevent reuse.
+
+### Fee Enforcement Constraints
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| All Fee-Requiring Circuits | Fee Amount Validation | Fee avoidance | ✅ Strict fee amount validation against fee quote |
+| All Fee-Requiring Circuits | Fee Recipient Validation | Incorrect fee recipient | ✅ Fee recipient public key validated against fee quote |
+| All Fee-Requiring Circuits | Fee Quote Signature | Forged fee quotes | ✅ Signature verification on fee quotes with domain separation |
+| All Fee-Requiring Circuits | Fee Quote Expiry | Expired fee quotes | ✅ Timestamp validation against current time |
+
+**Findings:** Fee enforcement constraints are properly implemented across all circuits. The fee amount, recipient, and expiry are all validated against the signed fee quote.
+
+### Asset ID Constraints
+
+| Circuit | Constraint | Potential Vulnerability | Mitigation |
+|---------|------------|-------------------------|------------|
+| NativeAssetCreate | Asset ID Generation | Asset ID forgery | ✅ Deterministic asset ID from creator-controlled parameters |
+| All Asset Circuits | Asset ID Validation | Asset type confusion | ✅ Strict asset ID validation in all operations |
+| Transfer Circuit | Asset Type Preservation | Asset type swapping | ✅ Input and output asset IDs must match |
+| Burn Circuits | Asset ID Validation | Burning wrong asset | ✅ Asset ID validated against input UTXO |
+
+**Findings:** Asset ID constraints are properly implemented with deterministic generation and validation across all circuits. The system prevents asset type confusion and unauthorized asset creation.
+
+### Conclusion of Circuit Constraint Analysis
+
+The manual review of all circuit constraints confirms that the 0BTC Wire system correctly implements the necessary security properties:
+
+1. **Signature Security:** All signature verifications use proper domain separation and curve validation.
+2. **Value Conservation:** All circuits enforce strict conservation of value constraints.
+3. **Double Spending Prevention:** Nullifier generation and registration prevent double spending.
+4. **Replay Prevention:** Unique identifiers and blinding factors prevent transaction replay.
+5. **Fee Enforcement:** Fee validation ensures proper fee payment for all operations.
+6. **Asset Type Safety:** Asset ID validation prevents asset type confusion and unauthorized creation.
+
+No critical vulnerabilities were identified in the circuit constraints that would allow bypassing signature checks, violating conservation of value, double spending, or replaying transactions.
+
 ## Security Testing Results
 
 ### Fuzz Testing

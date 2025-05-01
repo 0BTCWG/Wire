@@ -4,6 +4,7 @@ use plonky2::field::types::Field;
 use plonky2::hash::hash_types::{HashOutTarget, RichField};
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::core::UTXOTarget;
@@ -11,12 +12,12 @@ use crate::errors::{WireError, CryptoError, WireResult};
 
 // Domain separators for different hash usages
 // These constants ensure that hashes for different purposes cannot collide
-const DOMAIN_GENERIC: u64 = 1;
-const DOMAIN_UTXO: u64 = 2;
-const DOMAIN_NULLIFIER: u64 = 3;
-const DOMAIN_SIGNATURE: u64 = 4;
-const DOMAIN_MERKLE: u64 = 5;
-const DOMAIN_ASSET_ID: u64 = 6;
+pub const DOMAIN_GENERIC: u64 = 1;
+pub const DOMAIN_UTXO: u64 = 2;
+pub const DOMAIN_NULLIFIER: u64 = 3;
+pub const DOMAIN_SIGNATURE: u64 = 4;
+pub const DOMAIN_MERKLE: u64 = 5;
+pub const DOMAIN_ASSET_ID: u64 = 6;
 
 /// Hash a list of targets using Poseidon hash with domain separation
 /// This is the original implementation, kept for backward compatibility
@@ -290,18 +291,15 @@ pub fn calculate_asset_id<F: RichField + Extendable<D>, const D: usize>(
     max_supply: Target,
     is_mintable: Target,
 ) -> WireResult<Vec<Target>> {
-    // Validate inputs
-    if creator_pubkey.is_empty() {
-        return Err(WireError::CryptoError(CryptoError::HashError(
-            "Creator public key cannot be empty".to_string()
-        )));
-    }
-    
-    // Add domain separator for asset ID calculation
+    // Create domain separator for asset ID
     let domain_separator = builder.constant(F::from_canonical_u64(DOMAIN_ASSET_ID));
     
-    // Convert is_mintable boolean to field element (0 or 1)
-    let is_mintable_field = bool_to_field(builder, is_mintable);
+    // Convert is_mintable Target to BoolTarget first, then to field element (0 or 1)
+    // First check if is_mintable is 0 or 1
+    let one = builder.one();
+    let zero = builder.zero();
+    let is_mintable_bool = builder.is_equal(is_mintable, one);
+    let is_mintable_field = builder.select(is_mintable_bool, one, zero);
     
     // Combine all inputs
     let mut inputs = vec![domain_separator];
@@ -562,10 +560,10 @@ pub fn count_optimized_utxo_hash_gates<F: RichField + Extendable<D>, const D: us
     
     // Create a UTXOTarget
     let utxo = UTXOTarget {
-        owner_pubkey_hash_target: owner_pubkey_hash,
-        asset_id_target: asset_id,
+        owner_pubkey_hash_target: owner_pubkey_hash.clone(),
+        asset_id_target: asset_id.clone(),
         amount_target: amount,
-        salt_target: salt,
+        salt_target: salt.clone(),
     };
     
     // Hash the dummy UTXO using the optimized hash
@@ -596,16 +594,18 @@ mod tests {
         
         // Hash the values using different methods
         let hash1 = hash_n(&mut builder, &[value1, value2, value3]);
-        let hash2 = optimized_hash(&mut builder, &[value1, value2, value3]).unwrap();
+        let hash2 = optimized_hash(&mut builder, &[value1, value2, value3]);
         
         // The hashes should be the same
-        let are_equal = builder.connect(hash1, hash2);
+        let _are_equal = builder.connect(hash1, hash2);
         
         // Build the circuit
         let circuit = builder.build::<C>();
         
         // The connection should be valid
-        assert!(circuit.verify_gate(are_equal, &[]));
+        let pw = PartialWitness::new();
+        let proof = circuit.prove(pw).unwrap();
+        assert!(circuit.verify(proof.clone()).is_ok());
     }
     
     #[test]
@@ -636,8 +636,9 @@ mod tests {
         let circuit = builder.build::<C>();
         
         // The circuit should be satisfied
-        let proof = circuit.data.prove(vec![]).unwrap();
-        assert!(circuit.data.verify(proof).is_ok());
+        let pw = PartialWitness::new();
+        let proof = circuit.prove(pw).unwrap();
+        assert!(circuit.verify(proof.clone()).is_ok());
     }
     
     #[test]
@@ -649,13 +650,15 @@ mod tests {
         let hash2 = hash(&mut builder, &[]).unwrap();
         
         // The hashes should be the same
-        let are_equal = builder.connect(hash1, hash2);
+        let _are_equal = builder.connect(hash1, hash2);
         
         // Build the circuit
         let circuit = builder.build::<C>();
         
         // The connection should be valid
-        assert!(circuit.verify_gate(are_equal, &[]));
+        let pw = PartialWitness::new();
+        let proof = circuit.prove(pw).unwrap();
+        assert!(circuit.verify(proof.clone()).is_ok());
     }
     
     #[test]
@@ -682,10 +685,10 @@ mod tests {
         
         // Create a UTXOTarget
         let utxo = UTXOTarget {
-            owner_pubkey_hash_target: owner_pubkey_hash,
-            asset_id_target: asset_id,
+            owner_pubkey_hash_target: owner_pubkey_hash.clone(),
+            asset_id_target: asset_id.clone(),
             amount_target: amount,
-            salt_target: salt,
+            salt_target: salt.clone(),
         };
         
         // Hash the UTXO

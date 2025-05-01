@@ -217,7 +217,7 @@ pub fn compute_asset_id<F: RichField>(
     inputs.push(max_supply);
     inputs.push(is_mintable);
     
-    poseidon_hash(&inputs)
+    poseidon_hash_with_domain(&inputs, domains::ASSET_ID)
 }
 
 /// Compute the asset ID for a native asset in the circuit
@@ -233,7 +233,7 @@ pub fn compute_asset_id_targets<F: RichField + Extendable<D>, const D: usize>(
     inputs.extend_from_slice(asset_symbol);
     inputs.push(asset_decimals);
     
-    compute_hash_targets(builder, &inputs)
+    poseidon_hash_with_domain_targets(builder, &inputs, domains::ASSET_ID)
 }
 
 /// Compute a message hash for signature verification
@@ -246,7 +246,7 @@ pub fn compute_message_hash_targets<F: RichField + Extendable<D>, const D: usize
     builder: &mut CircuitBuilder<F, D>,
     targets: &[Target],
 ) -> Target {
-    compute_hash_targets(builder, targets)
+    poseidon_hash_with_domain_targets(builder, targets, domains::MESSAGE)
 }
 
 /// Compute a Poseidon hash with domain separation for Merkle tree nodes

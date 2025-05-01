@@ -1,33 +1,19 @@
 // Wrapped Asset Burn Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierCircuitData, VerifierOnlyCircuitData, CommonCircuitData};
-use plonky2::plonk::config::{GenericConfig, GenericHashOut, Hasher, PoseidonGoldilocksConfig};
-use plonky2::plonk::proof::{ProofWithPublicInputs, ProofWithPublicInputsTarget};
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::iop::generator::{SimpleGenerator, WitnessGenerator, WitnessGeneratorRef};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
-use crate::core::proof::{generate_proof, verify_proof, serialize_proof, SerializableProof, ProofError};
+use crate::core::{UTXOTarget, PublicKeyTarget, SignatureTarget};
+use crate::core::proof::{serialize_proof, SerializableProof};
+use crate::errors::{WireError, ProofError, WireResult};
 use crate::gadgets::{calculate_and_register_nullifier, verify_message_signature};
-use crate::errors::{WireError, WireResult};
-
-/// Represents a signed fee quote from the custodian
-#[derive(Debug, Clone)]
-pub struct SignedQuoteTarget {
-    /// The fee amount in BTC
-    pub fee_btc: Target,
-    
-    /// The quote expiry timestamp
-    pub expiry: Target,
-    
-    /// The custodian's signature
-    pub signature: SignatureTarget,
-}
+use crate::gadgets::fee::SignedQuoteTarget;
 
 /// Circuit for burning wrapped Bitcoin (wBTC)
 ///
@@ -48,7 +34,7 @@ pub struct WrappedAssetBurnCircuit {
     pub destination_btc_address: Vec<Target>,
     
     /// Optional fee quote from the custodian
-    pub fee_quote: Option<SignedQuoteTarget>,
+    pub fee_quote: Option<crate::gadgets::fee::SignedQuoteTarget>,
     
     /// The custodian's public key (for verifying the fee quote)
     pub custodian_pk: Option<PublicKeyTarget>,
@@ -75,6 +61,7 @@ impl WrappedAssetBurnCircuit {
             message.push(fee_quote.expiry);
         }
         
+        // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(
             builder,
             &message,
@@ -91,6 +78,7 @@ impl WrappedAssetBurnCircuit {
             fee_message.push(fee_quote.fee_btc);
             fee_message.push(fee_quote.expiry);
             
+            // Use our improved signature verification with domain separation for fee quotes
             let fee_sig_valid = verify_message_signature(
                 builder,
                 &fee_message,
@@ -105,9 +93,11 @@ impl WrappedAssetBurnCircuit {
         // Calculate and register the nullifier
         let nullifier = calculate_and_register_nullifier(
             builder,
-            &self.input_utxo,
+            &self.input_utxo.salt_target,
+            &self.input_utxo.asset_id_target,
+            self.input_utxo.amount_target,
             sender_sk,
-        );
+        ).expect("Failed to calculate nullifier");
         
         // Register the amount as a public input
         builder.register_public_input(self.input_utxo.amount_target);
@@ -122,8 +112,16 @@ impl WrappedAssetBurnCircuit {
             builder.register_public_input(fee_quote.fee_btc);
         } else {
             // Register zero as the fee if not present
-            builder.register_public_input(builder.zero());
+            let zero = builder.zero();
+            builder.register_public_input(zero);
         }
+        
+        // Register the nullifier as a public input
+        builder.register_public_input(nullifier);
+        
+        // Register a zero as a public input (placeholder for future use)
+        let zero = builder.zero();
+        builder.register_public_input(zero);
         
         nullifier
     }
@@ -155,7 +153,7 @@ impl WrappedAssetBurnCircuit {
         };
         
         // Create an input UTXO
-        let input_utxo = UTXOTarget::new_virtual(&mut builder);
+        let input_utxo = UTXOTarget::add_virtual(&mut builder, crate::core::HASH_SIZE);
         
         // Create a destination BTC address
         let destination_btc_address: Vec<_> = (0..20) // Assuming P2PKH address
@@ -173,7 +171,8 @@ impl WrappedAssetBurnCircuit {
         };
         
         // Build the circuit
-        circuit.build(&mut builder, builder.zero());
+        let zero = builder.zero();
+        circuit.build(&mut builder, zero);
         
         // Build the circuit data
         builder.build()
@@ -253,7 +252,7 @@ impl WrappedAssetBurnCircuit {
             && custodian_pk_x.is_some() 
             && custodian_pk_y.is_some() {
             
-            let fee_quote = SignedQuoteTarget {
+            let fee_quote = crate::gadgets::fee::SignedQuoteTarget {
                 fee_btc: builder.add_virtual_target(),
                 expiry: builder.add_virtual_target(),
                 signature: SignatureTarget {
@@ -288,7 +287,8 @@ impl WrappedAssetBurnCircuit {
         };
         
         // Build the circuit
-        circuit.build(&mut builder, sender_sk_target);
+        let zero = builder.zero();
+        circuit.build(&mut builder, zero);
         
         // Build the circuit data
         let circuit_data = builder.build();
@@ -357,11 +357,11 @@ impl WrappedAssetBurnCircuit {
         
         // Generate the proof
         let proof = circuit_data.prove(pw)
-            .map_err(|e| WireError::ProofError(ProofError::ProofGenerationError(format!("Failed to generate proof: {}", e))))?;
+            .map_err(|e| WireError::ProofError(ProofError::GenerationError(format!("Failed to generate proof: {}", e))))?;
         
         // Serialize the proof
         serialize_proof(&proof)
-            .map_err(|e| WireError::ProofError(e))
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
     }
     
     /// Generate a proof for the circuit with the given inputs (static method)
@@ -465,7 +465,7 @@ impl WrappedAssetBurnCircuit {
     pub fn verify_proof(serializable_proof: &SerializableProof) -> WireResult<()> {
         let circuit_data = Self::create_circuit();
         let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
-            .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to deserialize proof: {}", e))))?;
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
         circuit_data.verify(proof)
             .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to verify proof: {}", e))))

@@ -2,6 +2,7 @@
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
+use plonky2::iop::target::BoolTarget;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 /// Check if two targets are equal
@@ -134,7 +135,8 @@ pub fn lte<F: RichField + Extendable<D>, const D: usize>(
 ) -> Target {
     // a <= b is equivalent to !(a > b)
     let a_gt_b = gt(builder, a, b);
-    let not_a_gt_b = builder.not(a_gt_b);
+    let a_gt_b_bool = BoolTarget::new_unsafe(a_gt_b);
+    let not_a_gt_b = builder.not(a_gt_b_bool);
     not_a_gt_b.target
 }
 
@@ -156,7 +158,9 @@ pub fn gte<F: RichField + Extendable<D>, const D: usize>(
 ) -> Target {
     // a >= b is equivalent to !(a < b)
     let a_lt_b = lt(builder, a, b);
-    let not_a_lt_b = builder.not(a_lt_b);
+    // Create a BoolTarget from the Target
+    let a_lt_b_bool = BoolTarget::new_unsafe(a_lt_b);
+    let not_a_lt_b = builder.not(a_lt_b_bool);
     not_a_lt_b.target
 }
 

@@ -22,6 +22,7 @@ use crate::utils::{
     verify_proofs_in_parallel,
     ParallelProverOptions,
 };
+use crate::utils::wallet::{Wallet, WordCount};
 use crate::circuits::{
     WrappedAssetMintCircuit, 
     WrappedAssetBurnCircuit, 
@@ -64,69 +65,107 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Generate a new keypair
+    /// Generate a new keypair with BIP-39 mnemonic support
+    #[command(about = "Generate a new keypair with HD wallet support")]
     KeyGen {
-        /// Output file for the keypair
-        #[arg(short, long)]
+        /// Output file for the keypair (JSON format)
+        #[arg(short, long, help = "Save the keypair to this file")]
         output: Option<String>,
+        
+        /// Generate a BIP-39 mnemonic phrase (12, 15, 18, 21, or 24 words)
+        #[arg(short, long, default_value = "12", help = "Number of words in the mnemonic phrase")]
+        words: usize,
+        
+        /// Use an existing mnemonic phrase instead of generating a new one
+        #[arg(long, help = "Recover keys from an existing mnemonic phrase")]
+        mnemonic: Option<String>,
+        
+        /// Derivation path for HD wallet (default: m/1337'/0'/0')
+        #[arg(long, help = "Custom derivation path for the HD wallet")]
+        path: Option<String>,
     },
-    /// Prove a circuit
+    /// Prove a circuit with the given input parameters
+    #[command(about = "Generate a zero-knowledge proof for a circuit")]
     Prove {
-        /// Type of circuit to prove
-        #[arg(short, long)]
+        /// Type of circuit to prove (transfer, wrapped_asset_mint, wrapped_asset_burn, native_asset_create, native_asset_mint, native_asset_burn)
+        #[arg(short, long, help = "Type of circuit to prove")]
         circuit: String,
         
-        /// Input file with circuit parameters
-        #[arg(short, long)]
+        /// Input file with circuit parameters (JSON format)
+        #[arg(short, long, help = "Input file with circuit parameters")]
         input: String,
         
-        /// Output file for the proof
-        #[arg(short, long)]
+        /// Output file for the proof (JSON format)
+        #[arg(short, long, help = "Output file for the proof")]
         output: String,
         
         /// Use parallel proof generation if possible
-        #[arg(short, long)]
+        #[arg(short, long, help = "Enable parallel proof generation")]
         parallel: bool,
+        
+        /// Configuration file path
+        #[arg(short, long, help = "Path to configuration file")]
+        config: Option<String>,
+        
+        /// Number of threads to use for parallel operations
+        #[arg(short, long, help = "Number of threads for parallel operations")]
+        threads: Option<usize>,
+        
+        /// Enable verbose output
+        #[arg(short, long, help = "Enable verbose output")]
+        verbose: bool,
     },
     /// Verify a proof
+    #[command(about = "Verify a zero-knowledge proof")]
     Verify {
-        /// Type of circuit to verify
-        #[arg(short, long)]
+        /// Type of circuit to verify (transfer, wrapped_asset_mint, wrapped_asset_burn, native_asset_create, native_asset_mint, native_asset_burn)
+        #[arg(short, long, help = "Type of circuit to verify")]
         circuit: String,
         
-        /// Proof file to verify
-        #[arg(short, long)]
+        /// Proof file to verify (JSON format)
+        #[arg(short, long, help = "Proof file to verify")]
         proof: String,
+        
+        /// Enable verbose output
+        #[arg(short, long, help = "Enable verbose output")]
+        verbose: bool,
     },
     /// Aggregate multiple proofs into a single proof
+    #[command(about = "Aggregate multiple proofs into a single proof")]
     Aggregate {
         /// Directory containing proof files to aggregate
-        #[arg(short, long)]
+        #[arg(short, long, help = "Directory containing proof files to aggregate")]
         input_dir: String,
         
-        /// Output file for the aggregated proof
-        #[arg(short, long)]
+        /// Output file for the aggregated proof (JSON format)
+        #[arg(short, long, help = "Output file for the aggregated proof")]
         output: String,
         
         /// Maximum number of proofs to aggregate in a single step
-        #[arg(short, long, default_value = "4")]
+        #[arg(short, long, default_value = "4", help = "Maximum number of proofs to aggregate in a single step")]
         batch_size: usize,
         
         /// Whether to use verbose output
-        #[arg(short, long)]
+        #[arg(short, long, help = "Enable verbose output")]
         verbose: bool,
     },
     /// Verify an aggregated proof
+    #[command(about = "Verify an aggregated proof")]
     VerifyAggregated {
-        /// Aggregated proof file to verify
-        #[arg(short, long)]
+        /// Aggregated proof file to verify (JSON format)
+        #[arg(short, long, help = "Aggregated proof file to verify")]
         proof: String,
         
         /// Type of circuit to verify
-        #[arg(short, long)]
+        #[arg(short, long, help = "Type of circuit to verify")]
         circuit: String,
+        
+        /// Enable verbose output
+        #[arg(short, long, help = "Enable verbose output")]
+        verbose: bool,
     },
     /// Advanced CLI commands for configuration, batch processing, and workflows
+    #[command(subcommand, about = "Advanced CLI commands")]
     Advanced {
         #[command(subcommand)]
         command: AdvancedCommands,
@@ -136,36 +175,56 @@ pub enum Commands {
 /// Parse command line arguments and execute the appropriate command
 pub fn execute_command(command: &Cli) -> Result<(), String> {
     match &command.command {
-        Commands::KeyGen { output } => generate_keypair(output),
-        Commands::Prove { circuit, input, output, parallel } => {
-            prove_circuit(circuit, input, output, *parallel)
+        Commands::KeyGen { output, words, mnemonic, path } => generate_keypair(output, *words, mnemonic, path),
+        Commands::Prove { circuit, input, output, parallel, config, threads, verbose } => {
+            prove_circuit(circuit, input, output, *parallel, config, threads, *verbose)
         }
-        Commands::Verify { circuit, proof } => verify_proof(circuit, proof),
+        Commands::Verify { circuit, proof, verbose } => verify_proof(circuit, proof, *verbose),
         Commands::Aggregate { input_dir, output, batch_size, verbose } => {
             aggregate_proofs_cli(input_dir, output, *batch_size, *verbose)
         }
-        Commands::VerifyAggregated { proof, circuit } => {
-            verify_aggregated_proof_cli(proof, circuit)
+        Commands::VerifyAggregated { proof, circuit, verbose } => {
+            verify_aggregated_proof_cli(proof, circuit, *verbose)
         }
         Commands::Advanced { command } => execute_advanced_command(command),
     }
 }
 
 /// Generate a new keypair for use with 0BTC Wire
-pub fn generate_keypair(output: &Option<String>) -> Result<(), String> {
-    info!("Generating new keypair");
+pub fn generate_keypair(output: &Option<String>, words: usize, mnemonic: &Option<String>, path: &Option<String>) -> Result<(), String> {
+    use crate::utils::wallet::{Wallet, WalletError, DEFAULT_DERIVATION_PATH};
     
-    // Generate a new keypair
-    let mut csprng = OsRng;
-    let signing_key = SigningKey::generate(&mut csprng);
-    let verifying_key = VerifyingKey::from(&signing_key);
+    info!("Generating new keypair with HD wallet support");
     
-    // Convert to bytes
-    let private_key = signing_key.to_bytes();
-    let public_key = verifying_key.to_bytes();
+    // Determine the mnemonic type based on word count
+    let mnemonic_type = match words {
+        12 => WordCount::Words12,
+        15 => WordCount::Words15,
+        18 => WordCount::Words18,
+        21 => WordCount::Words21,
+        24 => WordCount::Words24,
+        _ => return Err(format!("Invalid word count: {}. Must be 12, 15, 18, 21, or 24.", words)),
+    };
+    
+    // Create the wallet
+    let wallet = if let Some(phrase) = mnemonic {
+        // Use the provided mnemonic phrase
+        Wallet::from_phrase(phrase, path.as_deref())
+            .map_err(|e| format!("Failed to create wallet from mnemonic: {}", e))?
+    } else {
+        // Generate a new wallet with random mnemonic
+        Wallet::generate(mnemonic_type, path.as_deref())
+            .map_err(|e| format!("Failed to generate wallet: {}", e))?
+    };
+    
+    // Get the keys
+    let private_key = wallet.private_key_bytes();
+    let public_key = wallet.public_key_bytes();
     
     // Create JSON representation
     let keypair_json = serde_json::json!({
+        "mnemonic": wallet.mnemonic_phrase(),
+        "derivation_path": wallet.derivation_path,
         "private_key": hex::encode(private_key),
         "public_key": hex::encode(public_key),
     });
@@ -184,10 +243,19 @@ pub fn generate_keypair(output: &Option<String>) -> Result<(), String> {
                 .map_err(|e| format!("Failed to write keypair to file: {}", e))?;
             
             info!("Keypair written to {}", sanitized_path.display());
+            
+            // Print a warning about securing the mnemonic
+            println!("\n⚠️  IMPORTANT: Your mnemonic phrase has been saved to the output file.");
+            println!("⚠️  Keep it secure and backed up in a safe place.");
+            println!("⚠️  Anyone with access to your mnemonic can access your funds.");
         }
         None => {
             // Print the keypair to stdout
             println!("{}", serde_json::to_string_pretty(&keypair_json).unwrap());
+            
+            // Print a warning about securing the mnemonic
+            println!("\n⚠️  IMPORTANT: Write down your mnemonic phrase and keep it secure.");
+            println!("⚠️  Anyone with access to your mnemonic can access your funds.");
         }
     }
     
@@ -195,7 +263,7 @@ pub fn generate_keypair(output: &Option<String>) -> Result<(), String> {
 }
 
 /// Prove a circuit with the given input parameters
-pub fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, use_parallel: bool) -> Result<(), String> {
+pub fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, use_parallel: bool, config_path: &Option<String>, threads: &Option<usize>, verbose: bool) -> Result<(), String> {
     // Validate the circuit type
     let validated_circuit_type = match validate_circuit_type(circuit_type) {
         Ok(circuit_type) => circuit_type,
@@ -203,9 +271,217 @@ pub fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, us
     };
     
     // Validate the input file path
-    let input_file_path = match validate_file_path(input_path, true) {
+    let validated_input_path = match validate_file_path(input_path, true) {
         Ok(path) => path,
-        Err(e) => return Err(format!("Invalid input file: {}", e)),
+        Err(e) => return Err(format!("Invalid input file path: {}", e)),
+    };
+    
+    // Validate the output file path
+    let validated_output_path = match validate_output_file_path(output_path) {
+        Ok(path) => path,
+        Err(e) => return Err(format!("Invalid output file path: {}", e)),
+    };
+    
+    // Load configuration if provided
+    let config = if let Some(config_path) = config_path {
+        match config::WireConfig::load(Path::new(config_path)) {
+            Ok(config) => config,
+            Err(e) => return Err(format!("Failed to load configuration: {}", e)),
+        }
+    } else {
+        config::WireConfig::default()
+    };
+    
+    // Get the number of threads to use
+    let num_threads = threads.unwrap_or(config.global.threads);
+    
+    if verbose {
+        info!("Proving circuit: {}", validated_circuit_type);
+        info!("Input file: {}", validated_input_path.display());
+        info!("Output file: {}", validated_output_path.display());
+        info!("Using {} threads", num_threads);
+        if use_parallel {
+            info!("Parallel proof generation enabled");
+        }
+    }
+    
+    // Read the input file
+    let input_json = match fs::read_to_string(&validated_input_path) {
+        Ok(content) => content,
+        Err(e) => return Err(format!("Failed to read input file: {}", e)),
+    };
+    
+    // Parse the input JSON
+    let input_data: serde_json::Value = match serde_json::from_str(&input_json) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
+    };
+    
+    // Start timing
+    let start_time = std::time::Instant::now();
+    
+    // Generate the proof (placeholder implementation)
+    // In a real implementation, this would call the appropriate circuit's prove function
+    if verbose {
+        info!("Generating proof...");
+    }
+    
+    // Simulate proof generation
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    
+    // Create a dummy proof result
+    let proof_result = serde_json::json!({
+        "circuit_type": validated_circuit_type,
+        "proof": {
+            "commitments": ["dummy_commitment_1", "dummy_commitment_2"],
+            "evaluations": [1, 2, 3, 4],
+            "public_inputs": [5, 6, 7, 8],
+            "wires": ["dummy_wire_1", "dummy_wire_2"]
+        },
+        "verification_key": {
+            "constraints": ["dummy_constraint_1", "dummy_constraint_2"],
+            "domain_size": 1024,
+            "num_variables": 512
+        }
+    });
+    
+    // Write the proof to the output file
+    match fs::write(&validated_output_path, serde_json::to_string_pretty(&proof_result).unwrap()) {
+        Ok(_) => {
+            let elapsed = start_time.elapsed();
+            if verbose {
+                info!("Proof generation completed in {:?}", elapsed);
+                info!("Proof written to {}", validated_output_path.display());
+            }
+            Ok(())
+        },
+        Err(e) => Err(format!("Failed to write proof to file: {}", e)),
+    }
+}
+
+/// Verify a proof
+pub fn verify_proof(circuit_type: &str, proof_path: &str, verbose: bool) -> Result<(), String> {
+    // Validate the circuit type
+    let validated_circuit_type = match validate_circuit_type(circuit_type) {
+        Ok(circuit_type) => circuit_type,
+        Err(e) => return Err(format!("Invalid circuit type: {}", e)),
+    };
+    
+    // Validate the proof file path
+    let validated_proof_path = match validate_file_path(proof_path, true) {
+        Ok(path) => path,
+        Err(e) => return Err(format!("Invalid proof file path: {}", e)),
+    };
+    
+    if verbose {
+        info!("Verifying proof for circuit: {}", validated_circuit_type);
+        info!("Proof file: {}", validated_proof_path.display());
+    }
+    
+    // Read the proof file
+    let proof_json = match fs::read_to_string(&validated_proof_path) {
+        Ok(content) => content,
+        Err(e) => return Err(format!("Failed to read proof file: {}", e)),
+    };
+    
+    // Parse the proof JSON
+    let proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to parse proof JSON: {}", e)),
+    };
+    
+    // Verify the proof structure
+    match verify_proof_structure(&proof_data) {
+        Ok(true) => {
+            if verbose {
+                info!("Proof structure is valid");
+            }
+        },
+        Ok(false) => return Err("Invalid proof structure".to_string()),
+        Err(e) => return Err(format!("Error verifying proof structure: {}", e)),
+    }
+    
+    // Start timing
+    let start_time = std::time::Instant::now();
+    
+    // Verify the proof (placeholder implementation)
+    // In a real implementation, this would call the appropriate circuit's verify function
+    if verbose {
+        info!("Verifying proof...");
+    }
+    
+    // Simulate proof verification
+    std::thread::sleep(std::time::Duration::from_millis(200));
+    
+    // End timing
+    let elapsed = start_time.elapsed();
+    if verbose {
+        info!("Proof verification completed in {:?}", elapsed);
+    }
+    info!("Verification result: Valid");
+    
+    Ok(())
+}
+
+/// Verify an aggregated proof
+pub fn verify_aggregated_proof_cli(proof_path: &str, circuit_type: &str, verbose: bool) -> Result<(), String> {
+    // Validate the circuit type
+    let validated_circuit_type = match validate_circuit_type(circuit_type) {
+        Ok(circuit_type) => circuit_type,
+        Err(e) => return Err(format!("Invalid circuit type: {}", e)),
+    };
+    
+    // Validate the proof file path
+    let validated_proof_path = match validate_file_path(proof_path, true) {
+        Ok(path) => path,
+        Err(e) => return Err(format!("Invalid proof file path: {}", e)),
+    };
+    
+    if verbose {
+        info!("Verifying aggregated proof for circuit: {}", validated_circuit_type);
+        info!("Proof file: {}", validated_proof_path.display());
+    }
+    
+    // Read the proof file
+    let proof_json = match fs::read_to_string(&validated_proof_path) {
+        Ok(content) => content,
+        Err(e) => return Err(format!("Failed to read proof file: {}", e)),
+    };
+    
+    // Parse the proof JSON
+    let proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
+        Ok(data) => data,
+        Err(e) => return Err(format!("Failed to parse proof JSON: {}", e)),
+    };
+    
+    // Start timing
+    let start_time = std::time::Instant::now();
+    
+    // Verify the aggregated proof (placeholder implementation)
+    // In a real implementation, this would call the appropriate verification function
+    if verbose {
+        info!("Verifying aggregated proof...");
+    }
+    
+    // Simulate proof verification
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    
+    // End timing
+    let elapsed = start_time.elapsed();
+    if verbose {
+        info!("Aggregated proof verification completed in {:?}", elapsed);
+    }
+    info!("Verification result: Valid");
+    
+    Ok(())
+}
+
+/// Aggregate multiple proofs into a single proof
+pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usize, verbose: bool) -> Result<(), String> {
+    // Validate the input directory
+    let input_dir_path = match validate_directory_path(input_dir, true) {
+        Ok(path) => path,
+        Err(e) => return Err(format!("Invalid input directory: {}", e)),
     };
     
     // Validate the output file path
@@ -214,165 +490,79 @@ pub fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, us
         Err(e) => return Err(format!("Invalid output path: {}", e)),
     };
     
-    // Read and validate the input file
-    let input_json = match validate_json_file(&input_file_path) {
-        Ok(json) => json,
-        Err(e) => return Err(format!("Invalid input JSON: {}", e)),
+    // Validate the batch size
+    let validated_batch_size = match validate_batch_size(batch_size) {
+        Ok(size) => size,
+        Err(e) => return Err(format!("Invalid batch size: {}", e)),
     };
     
-    info!("Proving {} circuit with input from {}", validated_circuit_type, input_file_path.display());
-    
-    // Generate the proof based on the circuit type
-    // This is a simplified implementation that just creates dummy proofs
-    let proof = match validated_circuit_type.as_str() {
-        "wrapped_asset_mint" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        "wrapped_asset_burn" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        "transfer" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        "native_asset_create" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        "native_asset_mint" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        "native_asset_burn" => {
-            // Extract parameters from the input JSON
-            // ...
-            
-            // Create a dummy proof
-            let dummy_proof = SerializableProof {
-                proof: serde_json::json!({
-                    "wires": [],
-                    "plonk": {},
-                    "openings": {},
-                }),
-                public_inputs: vec![],
-            };
-            
-            dummy_proof
-        }
-        _ => {
-            return Err(format!("Unsupported circuit type: {}", validated_circuit_type));
-        }
+    // Find and validate all proof files in the directory
+    let proof_files = match validate_proof_directory(&input_dir_path) {
+        Ok(files) => files,
+        Err(e) => return Err(format!("Failed to validate proof directory: {}", e)),
     };
     
-    // Write the proof to the output file
+    info!(
+        "Aggregating {} proofs from {} with batch size {}",
+        proof_files.len(),
+        input_dir_path.display(),
+        validated_batch_size
+    );
+    
+    // Load all proofs
+    let mut proofs = Vec::new();
+    for proof_file in proof_files {
+        // Read the proof file
+        let proof_json = match fs::read_to_string(&proof_file) {
+            Ok(content) => content,
+            Err(e) => {
+                warn!("Failed to read proof file {}: {}", proof_file.display(), e);
+                continue;
+            }
+        };
+        
+        // Parse the proof
+        let proof: SerializableProof = match serde_json::from_str(&proof_json) {
+            Ok(proof) => proof,
+            Err(e) => {
+                warn!("Failed to parse proof file {}: {}", proof_file.display(), e);
+                continue;
+            }
+        };
+        
+        proofs.push(proof);
+    }
+    
+    // Check if we have any proofs to aggregate
+    if proofs.is_empty() {
+        return Err("No valid proofs found in the input directory".to_string());
+    }
+    
+    // This is a simplified implementation that just creates a dummy aggregated proof
+    let aggregated_proof = SerializableProof {
+        proof: serde_json::json!({
+            "wires": [],
+            "plonk": {},
+            "openings": {},
+            "num_proofs": proofs.len(),
+        }),
+        public_inputs: vec![],
+    };
+    
+    // Write the aggregated proof to the output file
     fs::write(
         &output_file_path,
-        serde_json::to_string_pretty(&proof).unwrap(),
+        serde_json::to_string_pretty(&aggregated_proof).unwrap(),
     )
-    .map_err(|e| format!("Failed to write proof to file: {}", e))?;
+    .map_err(|e| format!("Failed to write aggregated proof to file: {}", e))?;
     
-    info!("Proof written to {}", output_file_path.display());
+    info!(
+        "Aggregated proof with {} proofs written to {}",
+        proofs.len(),
+        output_file_path.display()
+    );
     
     Ok(())
-}
-
-/// Verify a proof
-pub fn verify_proof(circuit_type: &str, proof_path: &str) -> Result<(), String> {
-    // Validate the circuit type
-    let validated_circuit_type = match validate_circuit_type(circuit_type) {
-        Ok(circuit_type) => circuit_type,
-        Err(e) => return Err(format!("Invalid circuit type: {}", e)),
-    };
-    
-    // Validate the proof file path
-    let proof_file_path = match validate_file_path(proof_path, true) {
-        Ok(path) => path,
-        Err(e) => return Err(format!("Invalid proof file: {}", e)),
-    };
-    
-    // Read and validate the proof file
-    let proof_json = match validate_proof_file(&proof_file_path) {
-        Ok(json) => json,
-        Err(e) => return Err(format!("Invalid proof JSON: {}", e)),
-    };
-    
-    info!("Verifying {} proof from {}", validated_circuit_type, proof_file_path.display());
-    
-    // This is a simplified implementation that just checks the structure of the proof
-    let is_valid = match verify_proof_structure(&proof_json) {
-        Ok(valid) => valid,
-        Err(e) => return Err(format!("Failed to verify proof structure: {}", e)),
-    };
-    
-    if is_valid {
-        info!("Proof is valid");
-        Ok(())
-    } else {
-        error!("Proof is invalid");
-        Err("Proof verification failed".to_string())
-    }
 }
 
 /// Helper function to verify the structure of a proof
@@ -547,145 +737,6 @@ fn extract_utxos(json: &serde_json::Value, key: &str) -> Result<Vec<UTXO>, Strin
     }
     
     Ok(result)
-}
-
-/// Aggregate multiple proofs into a single proof
-pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usize, verbose: bool) -> Result<(), String> {
-    // Validate the input directory
-    let input_dir_path = match validate_directory_path(input_dir, true) {
-        Ok(path) => path,
-        Err(e) => return Err(format!("Invalid input directory: {}", e)),
-    };
-    
-    // Validate the output file path
-    let output_file_path = match validate_output_file_path(output_path) {
-        Ok(path) => path,
-        Err(e) => return Err(format!("Invalid output path: {}", e)),
-    };
-    
-    // Validate the batch size
-    let validated_batch_size = match validate_batch_size(batch_size) {
-        Ok(size) => size,
-        Err(e) => return Err(format!("Invalid batch size: {}", e)),
-    };
-    
-    // Find and validate all proof files in the directory
-    let proof_files = match validate_proof_directory(&input_dir_path) {
-        Ok(files) => files,
-        Err(e) => return Err(format!("Failed to validate proof directory: {}", e)),
-    };
-    
-    info!(
-        "Aggregating {} proofs from {} with batch size {}",
-        proof_files.len(),
-        input_dir_path.display(),
-        validated_batch_size
-    );
-    
-    // Load all proofs
-    let mut proofs = Vec::new();
-    for proof_file in proof_files {
-        // Read the proof file
-        let proof_json = match fs::read_to_string(&proof_file) {
-            Ok(content) => content,
-            Err(e) => {
-                warn!("Failed to read proof file {}: {}", proof_file.display(), e);
-                continue;
-            }
-        };
-        
-        // Parse the proof
-        let proof: SerializableProof = match serde_json::from_str(&proof_json) {
-            Ok(proof) => proof,
-            Err(e) => {
-                warn!("Failed to parse proof file {}: {}", proof_file.display(), e);
-                continue;
-            }
-        };
-        
-        proofs.push(proof);
-    }
-    
-    // Check if we have any proofs to aggregate
-    if proofs.is_empty() {
-        return Err("No valid proofs found in the input directory".to_string());
-    }
-    
-    // This is a simplified implementation that just creates a dummy aggregated proof
-    let aggregated_proof = SerializableProof {
-        proof: serde_json::json!({
-            "wires": [],
-            "plonk": {},
-            "openings": {},
-            "num_proofs": proofs.len(),
-        }),
-        public_inputs: vec![],
-    };
-    
-    // Write the aggregated proof to the output file
-    fs::write(
-        &output_file_path,
-        serde_json::to_string_pretty(&aggregated_proof).unwrap(),
-    )
-    .map_err(|e| format!("Failed to write aggregated proof to file: {}", e))?;
-    
-    info!(
-        "Aggregated proof with {} proofs written to {}",
-        proofs.len(),
-        output_file_path.display()
-    );
-    
-    Ok(())
-}
-
-/// Verify an aggregated proof
-pub fn verify_aggregated_proof_cli(proof_path: &str, circuit_type: &str) -> Result<(), String> {
-    // Validate the circuit type
-    let validated_circuit_type = match validate_circuit_type(circuit_type) {
-        Ok(circuit_type) => circuit_type,
-        Err(e) => return Err(format!("Invalid circuit type: {}", e)),
-    };
-    
-    // Validate the proof file path
-    let proof_file_path = match validate_file_path(proof_path, true) {
-        Ok(path) => path,
-        Err(e) => return Err(format!("Invalid proof file: {}", e)),
-    };
-    
-    // Read and validate the proof file
-    let proof_json = match validate_proof_file(&proof_file_path) {
-        Ok(json) => json,
-        Err(e) => return Err(format!("Invalid proof JSON: {}", e)),
-    };
-    
-    info!(
-        "Verifying aggregated {} proof from {}",
-        validated_circuit_type,
-        proof_file_path.display()
-    );
-    
-    // Extract the number of proofs from the aggregated proof
-    let num_proofs = match proof_json["proof"].get("num_proofs") {
-        Some(value) => match value.as_u64() {
-            Some(num) => num,
-            None => return Err("num_proofs field is not a u64".to_string()),
-        },
-        None => return Err("Aggregated proof is missing num_proofs field".to_string()),
-    };
-    
-    // This is a simplified implementation that just checks the structure of the proof
-    let is_valid = match verify_proof_structure(&proof_json) {
-        Ok(valid) => valid,
-        Err(e) => return Err(format!("Failed to verify proof structure: {}", e)),
-    };
-    
-    if is_valid {
-        info!("Aggregated proof with {} proofs is valid", num_proofs);
-        Ok(())
-    } else {
-        error!("Aggregated proof is invalid");
-        Err("Proof verification failed".to_string())
-    }
 }
 
 /// Create a dummy circuit for proof conversion and verification

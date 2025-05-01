@@ -5,6 +5,8 @@ use std::time::Instant;
 
 use anyhow;
 use plonky2::field::extension::Extendable;
+use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_data::CircuitData;
@@ -263,7 +265,7 @@ pub fn verify_proofs_in_parallel<F: RichField + Extendable<D>, C: GenericConfig<
         .unwrap();
     
     // Create a shared results vector
-    let results = Arc::new(Mutex::new(Vec::with_capacity(circuits.len())));
+    let results = Arc::new(Mutex::new(Vec::<(usize, Result<(), anyhow::Error>)>::with_capacity(circuits.len())));
     
     // Create a shared counter for progress reporting
     let completed = Arc::new(Mutex::new(0));
@@ -283,13 +285,15 @@ pub fn verify_proofs_in_parallel<F: RichField + Extendable<D>, C: GenericConfig<
                 let verify_start = Instant::now();
                 
                 // Verify the proof
-                let result = circuit.verify(proof);
+                let result = match circuit.verify(proof.clone()) {
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(anyhow::anyhow!("{:?}", e)),
+                };
                 
                 let verification_time = verify_start.elapsed();
                 
-                // Store the result with its index
-                let mut results = results.lock().unwrap();
-                results.push((i, result.map_err(|e| anyhow::anyhow!("{:?}", e))));
+                // Store the result
+                results.lock().unwrap().push((i, result));
                 
                 // Update the progress counter
                 if verbose {
@@ -308,7 +312,7 @@ pub fn verify_proofs_in_parallel<F: RichField + Extendable<D>, C: GenericConfig<
     // Extract the verification results
     let verification_results: Vec<Result<(), anyhow::Error>> = results.iter()
         .map(|r| match &r.1 {
-            Ok(_) => Ok(()),
+            Ok(()) => Ok(()),
             Err(e) => Err(anyhow::anyhow!("{:?}", e)),
         })
         .collect();
@@ -375,7 +379,7 @@ mod tests {
         
         // Verify all proofs
         for proof in &proofs {
-            circuit.verify(proof).unwrap();
+            circuit.verify(proof.clone()).unwrap();
         }
     }
 }

@@ -7,16 +7,19 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
-use crate::gadgets::verify_message_signature;
+use crate::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
 use crate::gadgets::fee::enforce_fee_payment;
-use crate::utils::hash::compute_hash_targets as hash_targets;
+use crate::gadgets::hash::hash_targets;
+use crate::gadgets::verify_message_signature;
+use crate::errors::{WireError, ProofError, WireResult};
 
 /// Circuit for minting native asset tokens
 ///
 /// This circuit verifies that the minter is authorized to mint the asset,
 /// enforces the fee payment, and creates the output UTXO.
+#[derive(Clone)]
 pub struct NativeAssetMintCircuit {
     /// The minter's public key
     pub minter_pk: PublicKeyTarget,
@@ -43,6 +46,37 @@ pub struct NativeAssetMintCircuit {
     pub signature: SignatureTarget,
 }
 
+impl Default for NativeAssetMintCircuit {
+    fn default() -> Self {
+        Self {
+            minter_pk: PublicKeyTarget {
+                point: crate::core::PointTarget {
+                    x: Target::default(),
+                    y: Target::default(),
+                },
+            },
+            asset_id: vec![Target::default(); 32],
+            recipient_pk_hash: vec![Target::default(); 32],
+            mint_amount: Target::default(),
+            fee_input_utxo: UTXOTarget {
+                owner_pubkey_hash_target: vec![Target::default(); 32],
+                asset_id_target: vec![Target::default(); 32],
+                amount_target: Target::default(),
+                salt_target: vec![Target::default(); 32],
+            },
+            fee_amount: Target::default(),
+            fee_reservoir_address_hash: vec![Target::default(); 32],
+            signature: SignatureTarget {
+                r_point: crate::core::PointTarget {
+                    x: Target::default(),
+                    y: Target::default(),
+                },
+                s_scalar: Target::default(),
+            },
+        }
+    }
+}
+
 impl NativeAssetMintCircuit {
     /// Build the native asset mint circuit
     pub fn build<F: RichField + Extendable<D>, C: GenericConfig<D, F = F>, const D: usize>(
@@ -55,7 +89,7 @@ impl NativeAssetMintCircuit {
         message.extend_from_slice(&self.recipient_pk_hash);
         message.push(self.mint_amount);
         
-        // Verify the signature
+        // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(
             builder,
             &message,
@@ -64,17 +98,17 @@ impl NativeAssetMintCircuit {
         );
         
         // Assert that the signature is valid
-        let one = builder.one();
-        builder.connect(is_valid, one);
+        builder.assert_one(is_valid);
         
-        // Enforce fee payment
-        let _wbtc_change_amount = enforce_fee_payment(
+        // Enforce fee payment using our improved fee enforcement
+        enforce_fee_payment(
             builder,
-            &self.minter_pk,
+            &self.minter_pk, // fee payer public key
             &self.fee_input_utxo,
             self.fee_amount,
             &self.fee_reservoir_address_hash,
-            &self.signature,
+            &self.signature, // signature for fee verification
+            &self.asset_id, // expected asset ID
         );
         
         // Create a new UTXO for the minted tokens
@@ -91,10 +125,33 @@ impl NativeAssetMintCircuit {
         // In a real implementation, this would be a secure random value
         // For now, we'll just use a simple hash of the message
         let salt_hash = hash_targets(builder, &message);
+        
+        // Extract the elements from the HashOutTarget
+        let salt_element0 = salt_hash.elements[0];
+        let salt_element1 = salt_hash.elements[1];
+        let salt_element2 = salt_hash.elements[2];
+        let salt_element3 = salt_hash.elements[3];
+        
+        // Set salt targets using the hash elements
         for (i, target) in minted_utxo.salt_target.iter().enumerate() {
-            if i < salt_hash.elements.len() {
-                builder.connect(*target, salt_hash.elements[i]);
+            match i % 4 {
+                0 => builder.connect(*target, salt_element0),
+                1 => builder.connect(*target, salt_element1),
+                2 => builder.connect(*target, salt_element2),
+                _ => builder.connect(*target, salt_element3),
             }
+        }
+        
+        // Register the minted UTXO as public inputs
+        for target in &minted_utxo.owner_pubkey_hash_target {
+            builder.register_public_input(*target);
+        }
+        for target in &minted_utxo.asset_id_target {
+            builder.register_public_input(*target);
+        }
+        builder.register_public_input(minted_utxo.amount_target);
+        for target in &minted_utxo.salt_target {
+            builder.register_public_input(*target);
         }
         
         // Return the minted UTXO
@@ -190,9 +247,9 @@ impl NativeAssetMintCircuit {
         fee_input_utxo_data: (Vec<u8>, Vec<u8>, u64, Vec<u8>), // (owner_pubkey_hash, asset_id, amount, salt)
         fee_amount: u64,
         fee_reservoir_address_hash: Vec<u8>,
-    ) -> Result<crate::core::proof::SerializableProof, crate::core::proof::ProofError> {
+    ) -> WireResult<crate::core::proof::SerializableProof> {
         use plonky2::iop::witness::{PartialWitness, WitnessWrite};
-        use crate::core::proof::{serialize_proof, ProofError};
+        use crate::core::proof::{serialize_proof, ProofError as CoreProofError};
         
         // Create the circuit
         let _circuit_data = Self::create_circuit();
@@ -336,23 +393,106 @@ impl NativeAssetMintCircuit {
         
         // Generate the proof
         let proof = crate::core::proof::generate_proof(&circuit_data, pw)
-            .map_err(|e| ProofError::ProofGenerationError(format!("{:?}", e)))?;
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
         // Serialize the proof
         serialize_proof(&proof)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
     }
     
-    /// Verify a proof for the native asset mint circuit
-    pub fn verify_proof(serialized_proof: &crate::core::proof::SerializableProof) -> Result<(), crate::core::proof::ProofError> {
+    /// Verify a proof of a native asset mint
+    pub fn verify_proof(serialized_proof: &crate::core::proof::SerializableProof) -> WireResult<()> {
         use crate::core::proof::deserialize_proof;
         
-        // Create the circuit
-        let circuit_data = Self::create_circuit();
+        // Create a default instance to call build_circuit
+        let instance = Self::default();
+        
+        // Build the circuit
+        let (circuit_data, _) = instance.build_circuit()?;
         
         // Deserialize the proof
-        let proof = deserialize_proof(serialized_proof)?;
+        let proof = deserialize_proof(serialized_proof, &circuit_data.common)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
         
         // Verify the proof
-        crate::core::proof::verify_proof(&circuit_data, &proof)
+        crate::core::proof::verify_proof(&circuit_data, proof)
+            .map_err(|e| WireError::ProofError(ProofError::from(e)))
+    }
+
+    fn build_circuit(&self) -> WireResult<(CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2>, UTXOTarget)> {
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Create a minter public key
+        let minter_pk = PublicKeyTarget {
+            point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+        };
+        
+        // Create an asset ID
+        let asset_id: Vec<Target> = (0..32)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        // Create a recipient public key hash
+        let recipient_pk_hash: Vec<Target> = (0..32)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        // Create a mint amount
+        let mint_amount = builder.add_virtual_target();
+        
+        // Create a fee input UTXO
+        let fee_input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            asset_id_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+            amount_target: builder.add_virtual_target(),
+            salt_target: (0..32)
+                .map(|_| builder.add_virtual_target())
+                .collect(),
+        };
+        
+        // Create a fee amount
+        let fee_amount = builder.add_virtual_target();
+        
+        // Create a fee reservoir address
+        let fee_reservoir_address_hash: Vec<Target> = (0..32)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        
+        // Create a signature
+        let signature = SignatureTarget {
+            r_point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            },
+            s_scalar: builder.add_virtual_target(),
+        };
+        
+        // Create the circuit
+        let circuit = NativeAssetMintCircuit {
+            minter_pk,
+            asset_id,
+            recipient_pk_hash,
+            mint_amount,
+            fee_input_utxo,
+            fee_amount,
+            fee_reservoir_address_hash,
+            signature,
+        };
+        
+        // Build the circuit
+        let minted_utxo = circuit.build::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&mut builder);
+        
+        // Build the circuit data
+        let circuit_data = builder.build::<PoseidonGoldilocksConfig>();
+        
+        Ok((circuit_data, minted_utxo))
     }
 }

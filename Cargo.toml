@@ -15,6 +15,9 @@ sha2 = "0.10.7"
 poseidon-rs = "0.0.8"
 hex = "0.4.3"
 rand = "0.8.5"
+bip39 = "2.0.0"
+slip10 = "0.4.3"
+hmac = "0.12.1"
 
 # Serialization
 serde = { version = "1.0.183", features = ["derive"] }
@@ -45,6 +48,7 @@ web-sys = { version = "0.3.64", features = [
     "HtmlElement",
 ], optional = true }
 console_error_panic_hook = { version = "0.1.7", optional = true }
+num-traits = "0.2.19"
 
 [lib]
 name = "wire_lib"

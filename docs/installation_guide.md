@@ -11,6 +11,7 @@ This guide provides detailed instructions for installing and setting up the 0BTC
 5. [WASM Installation](#wasm-installation)
 6. [Building from Source](#building-from-source)
 7. [Troubleshooting](#troubleshooting)
+8. [Generating Test Vectors](#generating-test-vectors)
 
 ## Prerequisites
 
@@ -20,6 +21,8 @@ Before installing 0BTC Wire, ensure you have the following prerequisites:
 - OpenSSL development libraries
 - Node.js and npm (for WASM integration)
 - wasm-pack (for building WASM modules)
+- At least 8GB RAM for standard operations
+- At least 16GB RAM for generating test vectors and benchmarks
 
 ## Linux Installation
 
@@ -323,3 +326,21 @@ If you encounter issues not covered in this guide:
    RUST_LOG=debug wire --version
    ```
 3. Open a new issue with detailed information about your problem
+
+## Generating Test Vectors
+
+To generate test vectors for auditing, run the following command:
+
+```bash
+cargo run --release --bin generate_audit_test_vectors -- --output-dir ./test_vectors
+```
+
+This will generate test vectors for the 0BTC Wire protocol and save them to the specified output directory.
+
+For more options and customization, you can run:
+
+```bash
+cargo run --release --bin generate_audit_test_vectors -- --help
+```
+
+Note: Generating test vectors requires at least 16GB of RAM. If you have less than 16GB of RAM, you may need to increase the amount of RAM available to your system or use a cloud-based service to generate the test vectors.

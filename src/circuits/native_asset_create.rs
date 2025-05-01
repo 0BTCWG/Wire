@@ -4,13 +4,15 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use plonky2::plonk::config::GenericConfig;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
+use plonky2::hash::poseidon::PoseidonHash;
 
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, DEFAULT_FEE};
-use crate::utils::hash::compute_asset_id as calculate_asset_id;
 use crate::gadgets::fee::enforce_fee_payment;
+use crate::gadgets::hash;
 use crate::gadgets::verify_message_signature;
 
 /// Circuit for creating a new native asset
@@ -52,28 +54,15 @@ impl NativeAssetCreateCircuit {
         &self,
         builder: &mut CircuitBuilder<F, D>,
     ) -> Vec<Target> {
-        // Create the asset parameters
-        let mut asset_params = Vec::new();
-        asset_params.push(self.asset_nonce);
-        asset_params.push(self.decimals);
-        asset_params.push(self.max_supply);
-        asset_params.push(self.is_mintable);
-        
-        // Hash the asset parameters to create the asset ID
-        let asset_id = calculate_asset_id(
-            builder,
-            &[self.creator_pk.point.x, self.creator_pk.point.y],
+        // Verify the creator's signature
+        let message = vec![
             self.asset_nonce,
             self.decimals,
             self.max_supply,
             self.is_mintable,
-        );
+        ];
         
-        // Create a message to sign (the asset ID)
-        let mut message = Vec::new();
-        message.extend_from_slice(&asset_id);
-        
-        // Verify the signature
+        // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(
             builder,
             &message,
@@ -82,18 +71,52 @@ impl NativeAssetCreateCircuit {
         );
         
         // Assert that the signature is valid
-        let one = builder.one();
-        builder.connect(is_valid, one);
+        builder.assert_one(is_valid);
         
-        // Enforce fee payment
-        let _wbtc_change_amount = enforce_fee_payment(
+        // Calculate the asset ID using our improved asset ID calculation
+        // First create a vector of creator pubkey targets
+        let mut creator_pubkey_targets = Vec::new();
+        creator_pubkey_targets.push(self.creator_pk.point.x);
+        creator_pubkey_targets.push(self.creator_pk.point.y);
+        
+        // Convert is_mintable to a field element (0 or 1)
+        let one = builder.one();
+        let zero = builder.zero();
+        let is_mintable_bool = builder.is_equal(self.is_mintable, one);
+        let is_mintable_field = builder.select(is_mintable_bool, one, zero);
+        
+        // Create the inputs for the asset ID calculation
+        let mut inputs = Vec::new();
+        inputs.extend_from_slice(&creator_pubkey_targets);
+        inputs.push(self.asset_nonce);
+        inputs.push(self.decimals);
+        inputs.push(self.max_supply);
+        inputs.push(is_mintable_field);
+        
+        // Use domain-separated hash for asset ID
+        let domain_separator = builder.constant(F::from_canonical_u64(hash::DOMAIN_ASSET_ID));
+        let mut domain_inputs = vec![domain_separator];
+        domain_inputs.extend_from_slice(&inputs);
+        
+        // Hash the inputs to get the asset ID
+        let hash_out = builder.hash_n_to_hash_no_pad::<PoseidonHash>(domain_inputs);
+        let asset_id = hash_out.elements.to_vec();
+        
+        // Enforce fee payment using our improved fee enforcement
+        enforce_fee_payment(
             builder,
-            &self.creator_pk,
+            &self.creator_pk, // fee payer public key
             &self.fee_input_utxo,
             self.fee_amount,
             &self.fee_reservoir_address_hash,
-            &self.signature,
+            &self.signature, // signature for fee verification
+            &asset_id, // expected asset ID
         );
+        
+        // Register the asset ID as public inputs
+        for target in &asset_id {
+            builder.register_public_input(*target);
+        }
         
         // Return the asset ID
         asset_id
@@ -328,7 +351,7 @@ impl NativeAssetCreateCircuit {
         serialize_proof(&proof)
     }
     
-    /// Verify a proof for the native asset create circuit
+    /// Verify a proof of a native asset creation
     pub fn verify_proof(serialized_proof: &crate::core::proof::SerializableProof) -> Result<(), crate::core::proof::ProofError> {
         use crate::core::proof::deserialize_proof;
         
@@ -336,9 +359,9 @@ impl NativeAssetCreateCircuit {
         let circuit_data = Self::create_circuit();
         
         // Deserialize the proof
-        let proof = deserialize_proof(serialized_proof)?;
+        let proof = deserialize_proof(serialized_proof, &circuit_data.common)?;
         
         // Verify the proof
-        crate::core::proof::verify_proof(&circuit_data, &proof)
+        crate::core::proof::verify_proof(&circuit_data, proof)
     }
 }
