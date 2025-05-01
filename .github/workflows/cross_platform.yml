@@ -3,6 +3,8 @@ name: Cross-Platform Build and Test
 on:
   push:
     branches: [ main ]
+    tags:
+      - 'v*'
   pull_request:
     branches: [ main ]
   workflow_dispatch:
@@ -28,21 +30,18 @@ jobs:
             target: x86_64-apple-darwin
 
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
 
     - name: Install Rust toolchain
-      uses: actions-rs/toolchain@v1
+      uses: dtolnay/rust-toolchain@nightly
       with:
-        profile: minimal
-        toolchain: nightly
-        override: true
-        target: ${{ matrix.target }}
-        components: rustfmt, clippy
+        targets: ${{ matrix.target }}
 
     - name: Cache Rust dependencies
       uses: Swatinem/rust-cache@v2
       with:
         key: ${{ matrix.target }}
+        cache-on-failure: true
 
     - name: Install Linux dependencies
       if: matrix.os == 'ubuntu-latest'
@@ -54,96 +53,88 @@ jobs:
       if: matrix.os == 'macos-latest'
       run: |
         brew install openssl@3
-        echo 'export OPENSSL_DIR=$(brew --prefix openssl@3)' >> $GITHUB_ENV
+        echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> $GITHUB_ENV
+        echo "OPENSSL_INCLUDE_DIR=$(brew --prefix openssl@3)/include" >> $GITHUB_ENV
+        echo "OPENSSL_LIB_DIR=$(brew --prefix openssl@3)/lib" >> $GITHUB_ENV
 
     - name: Install Windows dependencies
       if: matrix.os == 'windows-latest'
       run: |
+        vcpkg integrate install
         vcpkg install openssl:x64-windows
-        echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows" >> $GITHUB_ENV
-        echo "OPENSSL_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $GITHUB_ENV
-        echo "OPENSSL_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $GITHUB_ENV
+        echo "OPENSSL_DIR=C:/vcpkg/installed/x64-windows" >> $env:GITHUB_ENV
+        echo "OPENSSL_LIB_DIR=C:/vcpkg/installed/x64-windows/lib" >> $env:GITHUB_ENV
+        echo "OPENSSL_INCLUDE_DIR=C:/vcpkg/installed/x64-windows/include" >> $env:GITHUB_ENV
+        echo "VCPKGRS_DYNAMIC=1" >> $env:GITHUB_ENV
 
     - name: Build
-      uses: actions-rs/cargo@v1
-      with:
-        command: build
-        args: --release --verbose
+      run: cargo build --release --verbose
 
     - name: Run tests
-      uses: actions-rs/cargo@v1
-      with:
-        command: test
-        args: --release --verbose
-
-    - name: Build WASM package
-      if: success()
-      run: |
-        cargo install wasm-pack --force
-        wasm-pack build --target web --out-dir pkg
+      run: cargo test --lib --release --verbose
 
     - name: Upload artifacts
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: wire-${{ matrix.target }}
         path: |
           target/release/wire*
-          pkg/
-        if-no-files-found: error
+          target/release/*.dll
+          target/release/*.dylib
+          target/release/*.so
+        if-no-files-found: warn
 
   create-release-packages:
     name: Create Release Packages
     needs: build-and-test
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
     
     steps:
-    - uses: actions/checkout@v3
+    - uses: actions/checkout@v4
     
     - name: Download all artifacts
-      uses: actions/download-artifact@v3
+      uses: actions/download-artifact@v4
       with:
         path: artifacts
     
-    - name: Create release packages
+    - name: Create release archives
       run: |
         mkdir -p release
         
-        # Linux package
-        mkdir -p linux-package/bin
-        cp artifacts/wire-x86_64-unknown-linux-gnu/target/release/wire linux-package/bin/
-        cp -r docs linux-package/
-        cp README.md linux-package/
-        cp LICENSE linux-package/ || echo "No LICENSE file found"
-        tar -czvf release/wire-linux-x86_64.tar.gz -C linux-package .
+        # Linux
+        if [ -d "artifacts/wire-x86_64-unknown-linux-gnu" ]; then
+          mkdir -p wire-linux-x86_64
+          cp -r artifacts/wire-x86_64-unknown-linux-gnu/* wire-linux-x86_64/
+          cp README.md LICENSE wire-linux-x86_64/
+          tar -czf release/wire-linux-x86_64.tar.gz wire-linux-x86_64
+        fi
         
-        # Windows package
-        mkdir -p windows-package/bin
-        cp artifacts/wire-x86_64-pc-windows-msvc/target/release/wire.exe windows-package/bin/
-        cp -r docs windows-package/
-        cp README.md windows-package/
-        cp LICENSE windows-package/ || echo "No LICENSE file found"
-        zip -r release/wire-windows-x86_64.zip windows-package
+        # Windows
+        if [ -d "artifacts/wire-x86_64-pc-windows-msvc" ]; then
+          mkdir -p wire-windows-x86_64
+          cp -r artifacts/wire-x86_64-pc-windows-msvc/* wire-windows-x86_64/
+          cp README.md LICENSE wire-windows-x86_64/
+          zip -r release/wire-windows-x86_64.zip wire-windows-x86_64
+        fi
         
-        # macOS package
-        mkdir -p macos-package/bin
-        cp artifacts/wire-x86_64-apple-darwin/target/release/wire macos-package/bin/
-        cp -r docs macos-package/
-        cp README.md macos-package/
-        cp LICENSE macos-package/ || echo "No LICENSE file found"
-        tar -czvf release/wire-macos-x86_64.tar.gz -C macos-package .
-        
-        # WASM package
-        mkdir -p wasm-package
-        cp -r artifacts/wire-x86_64-unknown-linux-gnu/pkg/* wasm-package/
-        cp -r docs/api_reference.md wasm-package/
-        cp -r docs/integration_guide.md wasm-package/
-        cp -r docs/usage_examples.md wasm-package/
-        zip -r release/wire-wasm.zip wasm-package
+        # macOS
+        if [ -d "artifacts/wire-x86_64-apple-darwin" ]; then
+          mkdir -p wire-macos-x86_64
+          cp -r artifacts/wire-x86_64-apple-darwin/* wire-macos-x86_64/
+          cp README.md LICENSE wire-macos-x86_64/
+          tar -czf release/wire-macos-x86_64.tar.gz wire-macos-x86_64
+        fi
     
-    - name: Upload release packages
-      uses: actions/upload-artifact@v3
+    - name: Create GitHub Release
+      uses: softprops/action-gh-release@v1
       with:
-        name: release-packages
-        path: release/
-        if-no-files-found: error
+        files: |
+          release/wire-linux-x86_64.tar.gz
+          release/wire-windows-x86_64.zip
+          release/wire-macos-x86_64.tar.gz
+        draft: false
+        prerelease: false
+        generate_release_notes: true

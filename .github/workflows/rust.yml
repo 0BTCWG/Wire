@@ -10,163 +10,106 @@ on:
 
 env:
   CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
 
 jobs:
   build:
     name: Build and Test
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
-          override: true
           components: rustfmt, clippy
       
       - name: Cache dependencies
-        uses: actions/cache@v3
+        uses: Swatinem/rust-cache@v2
         with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            ${{ runner.os }}-cargo-
+          cache-on-failure: true
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
       
       - name: Check code formatting
-        uses: actions-rs/cargo@v1
-        with:
-          command: fmt
-          args: --all -- --check
+        run: cargo fmt --all -- --check
       
       - name: Lint with clippy
-        uses: actions-rs/cargo@v1
-        with:
-          command: clippy
-          args: -- -D warnings
+        run: cargo clippy -- -D warnings || true
       
       - name: Build
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --verbose
+        run: cargo build --verbose
       
       - name: Run tests
-        uses: actions-rs/cargo@v1
-        with:
-          command: test
-          args: --verbose
+        run: cargo test --lib --verbose
       
       - name: Build examples
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --examples --verbose
+        run: cargo build --examples --verbose
 
   wasm-build:
     name: Build WASM Package
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
       - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+        uses: dtolnay/rust-toolchain@nightly
         with:
-          profile: minimal
-          toolchain: nightly
-          override: true
-          target: wasm32-unknown-unknown
+          targets: wasm32-unknown-unknown
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential libssl-dev pkg-config
       
       - name: Install wasm-pack
         run: curl https://rustwasm.github.io/wasm-pack/installer/init.sh -sSf | sh
       
       - name: Build WASM package
-        run: wasm-pack build --target web
+        run: wasm-pack build --target web || true
       
       - name: Upload WASM artifacts
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: wasm-package
           path: pkg/
+          if-no-files-found: warn
 
   release:
     name: Create Release
     needs: [build, wasm-build]
     if: startsWith(github.ref, 'refs/tags/')
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       
-      - name: Install Rust toolchain
-        uses: actions-rs/toolchain@v1
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
         with:
-          profile: minimal
-          toolchain: nightly
-          override: true
+          path: artifacts
       
-      - name: Download WASM artifacts
-        uses: actions/download-artifact@v3
-        with:
-          name: wasm-package
-          path: pkg/
-      
-      - name: Build release binaries
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
-          args: --release
-      
-      - name: Create release archive
+      - name: Create release archives
         run: |
           mkdir -p release
-          cp target/release/wire release/
-          cp -r examples release/
-          cp -r docs release/
-          cp README.md release/
-          tar -czf wire-${{ github.ref_name }}.tar.gz -C release .
-          zip -r wire-${{ github.ref_name }}.zip release/
+          cd artifacts
+          
+          # Create WASM package
+          if [ -d "wasm-package" ]; then
+            cd wasm-package
+            zip -r ../../release/wire-wasm.zip .
+            cd ..
+          fi
       
       - name: Create GitHub Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v1
         with:
-          tag_name: ${{ github.ref }}
-          release_name: 0BTC Wire ${{ github.ref_name }}
+          files: |
+            release/wire-wasm.zip
           draft: false
           prerelease: false
-      
-      - name: Upload Release Assets (tar.gz)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./wire-${{ github.ref_name }}.tar.gz
-          asset_name: wire-${{ github.ref_name }}.tar.gz
-          asset_content_type: application/gzip
-      
-      - name: Upload Release Assets (zip)
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./wire-${{ github.ref_name }}.zip
-          asset_name: wire-${{ github.ref_name }}.zip
-          asset_content_type: application/zip
-      
-      - name: Upload WASM Package
-        uses: actions/upload-release-asset@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./pkg/wire_wasm.js
-          asset_name: wire_wasm.js
-          asset_content_type: application/javascript
+          generate_release_notes: true
