@@ -10,8 +10,8 @@ use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use plonky2::plonk::proof::ProofWithPublicInputs;
 
 use crate::cli::config::BatchConfig;
-use crate::errors::{IOError, ValidationError, WireError, WireResult};
-use crate::utils::recursive_prover::{aggregate_proofs, RecursiveProverOptions};
+use wire_lib::errors::{IOError, ValidationError, WireError, WireResult};
+use wire_lib::utils::recursive_prover::{aggregate_proofs, RecursiveProverOptions};
 
 /// Batch processing options
 #[derive(Debug, Clone)]

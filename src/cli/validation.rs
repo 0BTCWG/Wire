@@ -2,7 +2,7 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::io;
-use log::{warn, error};
+use log::{warn};
 use serde_json::Value;
 
 /// Validation result type

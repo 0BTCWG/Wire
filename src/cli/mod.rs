@@ -1,20 +1,15 @@
 // CLI module for the 0BTC Wire system
 use clap::{Parser, Subcommand};
-use log::{info, error, warn};
+use log::{info, warn};
 use std::fs;
-use std::path::{Path, PathBuf};
-use rand::{rngs::OsRng, RngCore};
-use ed25519_dalek::{SigningKey, VerifyingKey};
+use std::path::{Path};
 
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2_field::types::Field;
-use plonky2::iop::target::Target;
-use plonky2::plonk::proof::ProofWithPublicInputs;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
-use crate::core::UTXO;
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, PointTarget};
-use crate::core::proof::SerializableProof;
-use crate::utils::{
+use wire_lib::core::UTXO;
+use wire_lib::core::proof::SerializableProof;
+use wire_lib::utils::{
     aggregate_proofs,
     verify_aggregated_proof,
     RecursiveProverOptions,
@@ -22,8 +17,8 @@ use crate::utils::{
     verify_proofs_in_parallel,
     ParallelProverOptions,
 };
-use crate::utils::wallet::{Wallet, WordCount};
-use crate::circuits::{
+use wire_lib::utils::wallet::{Wallet, WordCount};
+use wire_lib::circuits::{
     WrappedAssetMintCircuit, 
     WrappedAssetBurnCircuit, 
     TransferCircuit,
@@ -192,7 +187,7 @@ pub fn execute_command(command: &Cli) -> Result<(), String> {
 
 /// Generate a new keypair for use with 0BTC Wire
 pub fn generate_keypair(output: &Option<String>, words: usize, mnemonic: &Option<String>, path: &Option<String>) -> Result<(), String> {
-    use crate::utils::wallet::{Wallet, WalletError, DEFAULT_DERIVATION_PATH};
+    use wire_lib::utils::wallet::{Wallet, WalletError, DEFAULT_DERIVATION_PATH};
     
     info!("Generating new keypair with HD wallet support");
     
@@ -540,12 +535,12 @@ pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usiz
     
     // This is a simplified implementation that just creates a dummy aggregated proof
     let aggregated_proof = SerializableProof {
-        proof: serde_json::json!({
+        proof_bytes: serde_json::to_string(&serde_json::json!({
             "wires": [],
             "plonk": {},
             "openings": {},
             "num_proofs": proofs.len(),
-        }),
+        })).unwrap(),
         public_inputs: vec![],
     };
     

@@ -3,7 +3,7 @@ use std::time::Instant;
 use log::{debug, info, warn, error};
 
 use crate::cli::config::{Workflow, WorkflowStep};
-use crate::errors::{IOError, ValidationError, WireError, WireResult};
+use wire_lib::errors::{IOError, ValidationError, WireError, WireResult};
 
 /// Execute a workflow
 pub fn execute_workflow(workflow: &Workflow, verbose: bool) -> WireResult<()> {

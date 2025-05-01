@@ -1,13 +1,11 @@
 // Advanced CLI features for the 0BTC Wire system
 use clap::{Parser, Subcommand};
-use log::{info, error, warn, debug};
-use std::path::{Path, PathBuf};
+use log::{info};
+use std::path::{PathBuf};
 
-use crate::cli::config::{WireConfig, CircuitConfig};
-use crate::cli::batch::{BatchOptions, process_batch};
-use crate::cli::workflow::execute_workflow;
+use crate::cli::config::{WireConfig};
 use crate::cli::commands::{CommandOptions, execute_config_command, execute_batch_command, execute_workflow_command};
-use crate::errors::{ValidationError, WireError, WireResult};
+use wire_lib::errors::{ValidationError, WireError, WireResult};
 
 /// Advanced CLI commands for 0BTC Wire
 #[derive(Subcommand)]

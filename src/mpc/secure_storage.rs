@@ -4,8 +4,8 @@
 
 use crate::mpc::{MPCError, MPCResult};
 use crate::mpc::core::KeyShare;
-use aes_gcm::{Aes256Gcm, Key, Nonce};
-use aes_gcm::aead::{Aead, NewAead};
+use aes_gcm::{Aes256Gcm, KeyInit};
+use aes_gcm::aead::{Aead, Payload};
 use hmac::{Hmac, Mac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
@@ -58,21 +58,20 @@ impl SecureStorage {
             &mut key_bytes,
         ).map_err(|_| MPCError::InternalError("Failed to derive key".to_string()))?;
         
-        let key = Key::from_slice(&key_bytes);
-        let cipher = Aes256Gcm::new(key);
-        
         // Generate random nonce
         let mut nonce_bytes = [0u8; 12];
         OsRng.fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
         
         // Serialize data
         let serialized = serde_json::to_vec(data)
             .map_err(|e| MPCError::InternalError(format!("Failed to serialize data: {}", e)))?;
         
         // Encrypt data
-        let encrypted = cipher.encrypt(nonce, serialized.as_ref())
-            .map_err(|e| MPCError::InternalError(format!("Failed to encrypt data: {}", e)))?;
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+            .map_err(|_| MPCError::InternalError("Failed to create cipher".to_string()))?;
+        
+        let encrypted = cipher.encrypt(&nonce_bytes.into(), serialized.as_ref())
+            .map_err(|_| MPCError::InternalError("Encryption failed".to_string()))?;
         
         let encrypted_data = EncryptedData {
             encrypted_data: encrypted,
@@ -115,12 +114,11 @@ impl SecureStorage {
             &mut key_bytes,
         ).map_err(|_| MPCError::InternalError("Failed to derive key".to_string()))?;
         
-        let key = Key::from_slice(&key_bytes);
-        let cipher = Aes256Gcm::new(key);
+        let cipher = Aes256Gcm::new_from_slice(&key_bytes)
+            .map_err(|_| MPCError::InternalError("Failed to create cipher".to_string()))?;
         
         // Decrypt data
-        let nonce = Nonce::from_slice(&encrypted_data.nonce);
-        let decrypted = cipher.decrypt(nonce, encrypted_data.encrypted_data.as_ref())
+        let decrypted = cipher.decrypt(&encrypted_data.nonce.into(), encrypted_data.encrypted_data.as_ref())
             .map_err(|_| MPCError::InternalError("Failed to decrypt data (incorrect password?)".to_string()))?;
         
         // Deserialize data

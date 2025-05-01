@@ -4,12 +4,13 @@
 
 use crate::mpc::{MPCCore, MPCConfig, MPCError, MPCResult};
 use crate::mpc::core::KeyShare;
-use crate::mpc::ceremonies::{DKGCeremony, CeremonyStatus};
+use crate::mpc::ceremonies::{DKGCeremony, CeremonyStatus, Ceremony};
 use crate::mpc::secure_storage::KeyShareStorage;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
+use sha2::Digest;
 
 /// Key rotation status
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,7 +80,7 @@ impl KeyRotationManager {
     ) -> MPCResult<Self> {
         let mut manager = Self {
             mpc_core,
-            db_path,
+            db_path: db_path.clone(),
             key_share_storage,
             current_rotation: None,
         };
@@ -174,7 +175,12 @@ impl KeyRotationManager {
         self.key_share_storage.create_backup()?;
         
         // Create a new DKG ceremony
-        let ceremony = DKGCeremony::new(ceremony_id, self.mpc_core.clone())?;
+        let config = self.mpc_core.get_config();
+        let ceremony = DKGCeremony::new(
+            self.mpc_core.clone(),
+            config.parties,
+            config.threshold
+        );
         
         Ok(ceremony)
     }
@@ -188,7 +194,7 @@ impl KeyRotationManager {
         };
         
         // Start the DKG ceremony
-        ceremony.start()?;
+        Ceremony::start(ceremony)?;
         
         // Update the rotation status
         rotation.status = KeyRotationStatus::InProgress;
@@ -210,7 +216,7 @@ impl KeyRotationManager {
         };
         
         // Check if the ceremony is completed
-        if ceremony.get_status() != CeremonyStatus::Completed {
+        if ceremony.status() != CeremonyStatus::Completed {
             return Err(MPCError::CeremonyError("DKG ceremony not completed".to_string()));
         }
         

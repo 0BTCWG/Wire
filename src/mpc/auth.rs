@@ -1,17 +1,20 @@
-// Authentication for MPC Operators
+// MPC Authentication for 0BTC Wire
 //
 // This module provides multi-factor authentication for MPC operators.
 
 use crate::mpc::{MPCError, MPCResult};
 use hmac::{Hmac, Mac};
-use sha2::Sha256;
-use pbkdf2::pbkdf2;
 use rand::{rngs::OsRng, RngCore};
+use sha2::Sha256;
+use sha1::Sha1;
+use pbkdf2::pbkdf2;
+use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 use serde::{Serialize, Deserialize};
-use totp_rs::{TOTP, Algorithm};
+// Remove the totp-rs import as we'll implement our own simple TOTP
+// use totp_rs::{TOTP, Algorithm};
 use qrcode::QrCode;
 use qrcode::render::unicode::Dense1x2;
 
@@ -35,10 +38,10 @@ pub struct User {
     pub username: String,
     
     /// Password hash
-    pub password_hash: String,
+    pub password_hash: Vec<u8>,
     
     /// Salt for password hashing
-    pub salt: [u8; 16],
+    pub password_salt: Vec<u8>,
     
     /// TOTP secret
     pub totp_secret: String,
@@ -130,7 +133,7 @@ impl AuthManager {
     }
     
     /// Hash a password
-    fn hash_password(password: &str, salt: &[u8; 16]) -> MPCResult<String> {
+    fn hash_password(password: &str, salt: &[u8]) -> MPCResult<String> {
         let mut hash = [0u8; 32];
         pbkdf2::<Hmac<Sha256>>(
             password.as_bytes(),
@@ -149,6 +152,49 @@ impl AuthManager {
         base32::encode(base32::Alphabet::RFC4648 { padding: false }, &secret)
     }
     
+    /// Simple TOTP implementation
+    fn generate_totp(secret: &[u8], time_step: u64) -> String {
+        use hmac::{Hmac, Mac};
+        use sha1::Sha1;
+        
+        // Get current time in seconds and divide by time step (usually 30 seconds)
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs() / time_step;
+        
+        // Convert time to bytes (big-endian)
+        let time_bytes = current_time.to_be_bytes();
+        
+        // Create HMAC
+        let mut mac = Hmac::<Sha1>::new_from_slice(secret)
+            .expect("HMAC can take key of any size");
+        mac.update(&time_bytes);
+        let result = mac.finalize().into_bytes();
+        
+        // Dynamic truncation
+        let offset = (result[19] & 0xf) as usize;
+        let binary = ((result[offset] & 0x7f) as u32) << 24
+            | (result[offset + 1] as u32) << 16
+            | (result[offset + 2] as u32) << 8
+            | (result[offset + 3] as u32);
+        
+        // Modulo to get 6 digits
+        let otp = binary % 1_000_000;
+        
+        // Format as 6-digit string with leading zeros
+        format!("{:06}", otp)
+    }
+    
+    /// Verify TOTP code
+    fn verify_totp(secret: &[u8], code: &str, time_step: u64) -> bool {
+        // Generate current TOTP
+        let current_code = Self::generate_totp(secret, time_step);
+        
+        // Compare with provided code
+        current_code == code
+    }
+    
     /// Create a new user
     pub fn create_user(
         &mut self,
@@ -156,56 +202,63 @@ impl AuthManager {
         password: &str,
         role: UserRole,
     ) -> MPCResult<(String, String)> {
-        // Check if the user already exists
+        // Check if user already exists
         if self.users.contains_key(username) {
             return Err(MPCError::InternalError(format!("User {} already exists", username)));
         }
         
-        // Generate salt
+        // Generate salt for password
         let mut salt = [0u8; 16];
         OsRng.fill_bytes(&mut salt);
         
-        // Hash password
-        let password_hash = Self::hash_password(password, &salt)?;
+        // Hash password with salt
+        let mut password_hash = [0u8; 32];
+        pbkdf2::pbkdf2::<Hmac<Sha256>>(
+            password.as_bytes(),
+            &salt,
+            10000,
+            &mut password_hash,
+        ).map_err(|_| MPCError::InternalError("Failed to hash password".to_string()))?;
         
         // Generate TOTP secret
-        let totp_secret = Self::generate_totp_secret();
+        let mut totp_secret_bytes = [0u8; 20]; // 160 bits for SHA1
+        OsRng.fill_bytes(&mut totp_secret_bytes);
+        
+        // Encode TOTP secret in base32 for storage and display
+        let totp_secret = base32::encode(base32::Alphabet::RFC4648 { padding: false }, &totp_secret_bytes);
         
         // Create user
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| MPCError::InternalError(format!("Failed to get timestamp: {}", e)))?
-            .as_secs();
-        
         let user = User {
             username: username.to_string(),
-            password_hash,
-            salt,
+            password_hash: password_hash.to_vec(),
+            password_salt: salt.to_vec(),
             totp_secret: totp_secret.clone(),
             role,
-            last_login: None,
             failed_attempts: 0,
             locked_until: None,
-            created_at: timestamp,
-            updated_at: timestamp,
+            last_login: None,
+            created_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| MPCError::InternalError(format!("Failed to get timestamp: {}", e)))?
+                .as_secs(),
+            updated_at: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map_err(|e| MPCError::InternalError(format!("Failed to get timestamp: {}", e)))?
+                .as_secs(),
         };
         
-        // Add user
+        // Add user to database
         self.users.insert(username.to_string(), user);
         self.save_users()?;
         
         // Generate TOTP URI for QR code
-        let totp = TOTP::new(
-            Algorithm::SHA1,
-            6,
-            1,
-            30,
-            totp_secret.as_bytes(),
-            Some("0BTC Wire MPC".to_string()),
-            username.to_string(),
-        ).map_err(|e| MPCError::InternalError(format!("Failed to create TOTP: {}", e)))?;
-        
-        let totp_uri = totp.get_url();
+        let totp_uri = format!(
+            "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm=SHA1&digits=6&period=30",
+            "0BTC Wire MPC",
+            username,
+            totp_secret,
+            "0BTC Wire MPC"
+        );
         
         Ok((totp_secret, totp_uri))
     }
@@ -215,9 +268,10 @@ impl AuthManager {
         let code = QrCode::new(totp_uri)
             .map_err(|e| MPCError::InternalError(format!("Failed to create QR code: {}", e)))?;
         
-        let qr_code = code.render::<Dense1x2>()
-            .dark_color('█')
-            .light_color('░')
+        // Use ASCII rendering which is simpler
+        let qr_code = code.render::<char>()
+            .quiet_zone(true)
+            .module_dimensions(2, 1)
             .build();
         
         Ok(qr_code)
@@ -252,9 +306,9 @@ impl AuthManager {
         }
         
         // Verify password
-        let password_hash = Self::hash_password(password, &user.salt)?;
+        let password_hash = Self::hash_password(password, &user.password_salt)?;
         
-        if password_hash != user.password_hash {
+        if password_hash != hex::encode(&user.password_hash) {
             // Increment failed attempts
             user.failed_attempts += 1;
             
@@ -274,22 +328,12 @@ impl AuthManager {
         }
         
         // Verify TOTP code
-        let totp = TOTP::new(
-            Algorithm::SHA1,
-            6,
-            1,
-            30,
-            user.totp_secret.as_bytes(),
-            None,
-            username.to_string(),
-        ).map_err(|e| MPCError::InternalError(format!("Failed to create TOTP: {}", e)))?;
+        let totp_secret = match base32::decode(base32::Alphabet::RFC4648 { padding: false }, &user.totp_secret) {
+            Some(secret) => secret,
+            None => return Err(MPCError::InternalError("Failed to decode TOTP secret".to_string())),
+        };
         
-        let current_time = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .map_err(|e| MPCError::InternalError(format!("Failed to get current time: {}", e)))?
-            .as_secs();
-        
-        let is_valid = totp.check(totp_code, current_time);
+        let is_valid = Self::verify_totp(&totp_secret, totp_code, 30);
         
         if !is_valid {
             // Increment failed attempts
@@ -297,7 +341,10 @@ impl AuthManager {
             
             // Lock the user if too many failed attempts
             if user.failed_attempts >= self.max_failed_attempts {
-                user.locked_until = Some(current_time + self.lock_duration);
+                user.locked_until = Some(SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_err(|e| MPCError::InternalError(format!("Failed to get current time: {}", e)))?
+                    .as_secs() + self.lock_duration);
             }
             
             self.save_users()?;
@@ -306,9 +353,15 @@ impl AuthManager {
         }
         
         // Authentication successful
-        user.last_login = Some(current_time);
+        user.last_login = Some(SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| MPCError::InternalError(format!("Failed to get current time: {}", e)))?
+            .as_secs());
         user.failed_attempts = 0;
-        user.updated_at = current_time;
+        user.updated_at = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|e| MPCError::InternalError(format!("Failed to get current time: {}", e)))?
+            .as_secs();
         
         self.save_users()?;
         
@@ -329,9 +382,9 @@ impl AuthManager {
         };
         
         // Verify old password
-        let old_password_hash = Self::hash_password(old_password, &user.salt)?;
+        let old_password_hash = Self::hash_password(old_password, &user.password_salt)?;
         
-        if old_password_hash != user.password_hash {
+        if old_password_hash != hex::encode(&user.password_hash) {
             return Ok(false);
         }
         
@@ -343,8 +396,8 @@ impl AuthManager {
         let new_password_hash = Self::hash_password(new_password, &new_salt)?;
         
         // Update user
-        user.password_hash = new_password_hash;
-        user.salt = new_salt;
+        user.password_hash = hex::decode(new_password_hash).unwrap();
+        user.password_salt = new_salt.to_vec();
         user.updated_at = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map_err(|e| MPCError::InternalError(format!("Failed to get timestamp: {}", e)))?
@@ -376,17 +429,13 @@ impl AuthManager {
         self.save_users()?;
         
         // Generate TOTP URI for QR code
-        let totp = TOTP::new(
-            Algorithm::SHA1,
-            6,
-            1,
-            30,
-            totp_secret.as_bytes(),
-            Some("0BTC Wire MPC".to_string()),
-            username.to_string(),
-        ).map_err(|e| MPCError::InternalError(format!("Failed to create TOTP: {}", e)))?;
-        
-        let totp_uri = totp.get_url();
+        let totp_uri = format!(
+            "otpauth://totp/{}:{}?secret={}&issuer={}&algorithm=SHA1&digits=6&period=30",
+            "0BTC Wire MPC",
+            username,
+            totp_secret,
+            "0BTC Wire MPC"
+        );
         
         Ok((totp_secret, totp_uri))
     }

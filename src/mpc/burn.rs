@@ -111,7 +111,7 @@ impl BurnManager {
     ) -> MPCResult<Self> {
         let mut manager = Self {
             mpc_core,
-            db_path,
+            db_path: db_path.clone(),
             burn_proofs: HashMap::new(),
             withdrawals: HashMap::new(),
             bitcoin_rpc_url,

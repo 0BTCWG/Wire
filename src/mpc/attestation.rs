@@ -4,10 +4,11 @@
 // for wrapped Bitcoin (wBTC) based on verified Bitcoin deposits.
 
 use crate::mpc::{MPCCore, MPCError, MPCResult};
-use crate::mpc::ceremonies::SigningCeremony;
+use crate::mpc::ceremonies::{SigningCeremony, Ceremony};
 use crate::mpc::bitcoin::BitcoinDeposit;
-use ed25519_dalek::Signature as Ed25519Signature;
+use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey, Signature, Verifier};
 use serde::{Deserialize, Serialize};
+use serde_arrays;
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
@@ -35,6 +36,7 @@ pub struct MintAttestation {
     pub nonce: u64,
     
     /// Ed25519 signature
+    #[serde(with = "serde_arrays")]
     pub signature: [u8; 64],
     
     /// Expiry timestamp (Unix timestamp)
@@ -104,21 +106,26 @@ impl MintAttestation {
     
     /// Verify the attestation signature
     pub fn verify(&self, public_key: &[u8; 32]) -> bool {
-        use ed25519_dalek::{PublicKey, Signature, Verifier};
+        // Import the specific types we need from ed25519-dalek
+        use ed25519_dalek::{Signature, VerifyingKey, Verifier};
         
         let signing_bytes = self.to_signing_bytes();
         
-        let public_key = match PublicKey::from_bytes(public_key) {
+        // Try to convert the public key bytes to a VerifyingKey
+        let verifying_key = match VerifyingKey::from_bytes(public_key) {
             Ok(pk) => pk,
             Err(_) => return false,
         };
         
-        let signature = match Signature::from_bytes(&self.signature) {
+        // Try to convert the signature bytes to a Signature
+        // We need to handle the Result returned by from_bytes
+        let signature = match Signature::try_from(&self.signature[..]) {
             Ok(sig) => sig,
             Err(_) => return false,
         };
         
-        public_key.verify(&signing_bytes, &signature).is_ok()
+        // Verify the signature
+        verifying_key.verify(&signing_bytes, &signature).is_ok()
     }
 }
 
@@ -145,7 +152,7 @@ impl AttestationManager {
     pub fn new(mpc_core: MPCCore, db_path: String, validity_period: u64) -> MPCResult<Self> {
         let mut manager = Self {
             mpc_core,
-            db_path,
+            db_path: db_path.clone(),
             attestations: HashMap::new(),
             current_nonce: 0,
             validity_period,
@@ -232,12 +239,12 @@ impl AttestationManager {
         let mut ceremony = SigningCeremony::new(
             self.mpc_core.clone(),
             signing_bytes,
-            self.mpc_core.config.parties,
-            self.mpc_core.config.threshold,
+            self.mpc_core.get_config().parties,
+            self.mpc_core.get_config().threshold,
         );
         
         // Start ceremony
-        ceremony.start()?;
+        Ceremony::start(&mut ceremony)?;
         
         // Generate signature share
         let _signature_share = ceremony.generate_signature_share()?;

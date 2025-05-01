@@ -3,7 +3,7 @@
 // This module provides command-line interface functionality for MPC operators.
 
 use crate::mpc::{MPCConfig, MPCCore, MPCError, MPCResult};
-use crate::mpc::ceremonies::{DKGCeremony, SigningCeremony, CeremonyStatus};
+use crate::mpc::ceremonies::{DKGCeremony, SigningCeremony, CeremonyStatus, Ceremony};
 use crate::mpc::bitcoin::{DepositMonitor, WithdrawalProcessor};
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -139,6 +139,11 @@ pub fn run_cli() -> MPCResult<()> {
             key_share_path: "key_share.json".to_string(),
             tls_cert_path: "tls/cert.pem".to_string(),
             tls_key_path: "tls/key.pem".to_string(),
+            user_db_path: "users.db".to_string(),
+            security_db_path: "security.db".to_string(),
+            bitcoin_nodes: vec!["127.0.0.1:8332".to_string()],
+            normal_confirmations: 6,
+            fork_confirmations: 100,
         }
     };
     
@@ -237,6 +242,11 @@ fn cmd_init(
         key_share_path: "key_share.json".to_string(),
         tls_cert_path: "tls/cert.pem".to_string(),
         tls_key_path: "tls/key.pem".to_string(),
+        user_db_path: "users.db".to_string(),
+        security_db_path: "security.db".to_string(),
+        bitcoin_nodes: vec!["127.0.0.1:8332".to_string()],
+        normal_confirmations: 6,
+        fork_confirmations: 100,
     };
     
     // Save configuration
@@ -257,8 +267,8 @@ fn cmd_dkg(mpc_core: &MPCCore, ceremony_id: Option<String>) -> MPCResult<()> {
     // Create DKG ceremony
     let mut ceremony = DKGCeremony::new(
         mpc_core.clone(),
-        mpc_core.config.parties,
-        mpc_core.config.threshold,
+        mpc_core.get_config().parties,
+        mpc_core.get_config().threshold,
     );
     
     // Start ceremony
@@ -329,8 +339,8 @@ fn cmd_attest(
     let mut ceremony = SigningCeremony::new(
         mpc_core.clone(),
         message,
-        mpc_core.config.parties,
-        mpc_core.config.threshold,
+        mpc_core.get_config().parties,
+        mpc_core.get_config().threshold,
     );
     
     // Start ceremony
@@ -501,15 +511,20 @@ fn cmd_monitor_deposits(
         if !deposits_for_attestation.is_empty() {
             println!("Found {} deposits ready for attestation", deposits_for_attestation.len());
             
-            for deposit in deposits_for_attestation {
-                println!("Generating attestation for deposit: {}", deposit.txid);
+            // Collect the txids first to avoid borrowing issues
+            let deposit_txids: Vec<String> = deposits_for_attestation.iter()
+                .map(|deposit| deposit.txid.clone())
+                .collect();
+            
+            for txid in deposit_txids {
+                println!("Generating attestation for deposit: {}", txid);
                 
                 // In a real implementation, this would:
                 // 1. Create a signing ceremony for the attestation
                 // 2. Participate in the ceremony
                 // 3. Mark the deposit as attested
                 
-                monitor.mark_deposit_attested(&deposit.txid)?;
+                monitor.mark_deposit_attested(&txid)?;
             }
         }
         

@@ -148,7 +148,7 @@ impl BitcoinSecurityManager {
         
         let mut manager = Self {
             nodes,
-            db_path,
+            db_path: db_path.clone(),
             current_fork: None,
             double_spends: HashMap::new(),
             min_consensus_nodes,

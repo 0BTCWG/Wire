@@ -1,11 +1,11 @@
-use std::path::{Path, PathBuf};
 use std::time::Instant;
-use log::{debug, info, warn};
+use std::path::{Path, PathBuf};
+use log::{debug, info};
 
-use crate::cli::config::{WireConfig, CircuitConfig};
+use crate::cli::config::{WireConfig};
 use crate::cli::batch::{BatchOptions, process_batch};
 use crate::cli::workflow::execute_workflow;
-use crate::errors::{ValidationError, WireError, WireResult};
+use wire_lib::errors::{ValidationError, WireError, WireResult};
 
 /// CLI command options
 #[derive(Debug, Clone)]

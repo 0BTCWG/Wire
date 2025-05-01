@@ -128,7 +128,7 @@ impl FeeManager {
     ) -> MPCResult<Self> {
         let mut manager = Self {
             mpc_core,
-            db_path,
+            db_path: db_path.clone(),
             fee_reservoir_address,
             utxos: HashMap::new(),
             consolidations: HashMap::new(),

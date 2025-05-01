@@ -4,7 +4,7 @@
 // threshold Ed25519 signatures.
 
 use crate::mpc::{MPCConfig, MPCError, MPCResult};
-use ed25519_dalek::{PublicKey as Ed25519PublicKey, Signature as Ed25519Signature};
+use ed25519_dalek::{VerifyingKey as Ed25519PublicKey, Signature as Ed25519Signature};
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::Path;
@@ -53,6 +53,7 @@ pub struct SignatureShare {
 }
 
 /// Core MPC functionality
+#[derive(Debug, Clone)]
 pub struct MPCCore {
     /// Configuration for this MPC node
     config: MPCConfig,
@@ -163,6 +164,14 @@ impl MPCCore {
         let public_key = self.get_public_key()?;
         let ed25519_pk = public_key.to_ed25519()?;
         
-        Ok(ed25519_pk.verify_strict(message, signature).is_ok())
+        // In ed25519-dalek v2.0.0, verify_strict returns a Result<(), SignatureError>
+        // We need to check if it's Ok (valid) or Err (invalid)
+        let result = ed25519_pk.verify_strict(message, signature);
+        Ok(result.is_ok())
+    }
+    
+    /// Get a reference to the configuration
+    pub fn get_config(&self) -> &MPCConfig {
+        &self.config
     }
 }

@@ -1,6 +1,6 @@
-use clap::Parser;
 use env_logger::Env;
 use log::error;
+use clap::Parser;
 use wire_lib;
 
 mod cli;
