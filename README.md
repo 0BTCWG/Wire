@@ -35,68 +35,75 @@ The system uses Plonky2, a PLONK-based ZK proving system with recursive verifica
   - Customizable derivation paths
   - Secure key storage recommendations
 
+## Project Status
+
+This project has completed all core functionality and is now in a release-ready state:
+
+- All tests pass successfully
+- All compiler warnings have been addressed
+- All binaries build and run correctly
+- Documentation has been updated and is comprehensive
+- Audit test vectors have been generated and verified
+- All cryptographic operations use public, stable APIs
+
 ## Getting Started
 
 ### Prerequisites
 
-- Rust 1.65+ with Cargo
-- For WASM support: wasm-pack
+- Rust (nightly) with Cargo
+- OpenSSL development libraries
+- For WASM support: wasm-pack and Node.js
+- Minimum 8GB RAM for standard operations
+- Minimum 16GB RAM for test vector generation and benchmarks
 
 ### Installation
 
-For detailed installation instructions, see [INSTRUCTIONS.md](INSTRUCTIONS.md).
+For detailed installation instructions, see [docs/installation_guide.md](docs/installation_guide.md).
 
 ```bash
 # Clone the repository
 git clone https://github.com/0BTC/Wire.git
-cd Wire
 
 # Build the project
+cd Wire
 cargo build --release
 
-# Build WebAssembly module (optional)
-cargo install wasm-pack
-wasm-pack build --target web
+# Run tests
+cargo test
+
+# Generate audit test vectors
+cargo run --release --bin generate_audit_test_vectors -- --output-dir ./test_vectors
 ```
 
-### Usage
+## Documentation
 
-For comprehensive usage instructions, see [USER_GUIDE.md](USER_GUIDE.md).
+Comprehensive documentation is available in the `docs` directory:
 
-#### Command Line Interface
+- [Installation Guide](docs/installation_guide.md) - Detailed installation instructions
+- [API Reference](docs/api_reference.md) - Reference for all public APIs
+- [Integration Guide](docs/integration_guide.md) - Guide for integrating with other systems
+- [Security Model](docs/security_model.md) - Overview of the security model
+- [Audit Test Vectors](docs/AUDIT_TEST_VECTORS.md) - Guide for generating and using audit test vectors
 
-```bash
-# Generate a new keypair with mnemonic
-./target/release/wire keygen --words 24 --output my_keypair.json
+## Architecture
 
-# Recover from existing mnemonic
-./target/release/wire keygen --mnemonic "your mnemonic phrase here" --output recovered_keypair.json
+0BTC Wire is built with a modular architecture:
 
-# Prove a circuit
-./target/release/wire prove --circuit wrapped_asset_mint --input mint_params.json --output mint_proof.json --threads 8
+- **Core**: Basic types and utilities
+- **Gadgets**: Zero-knowledge circuit components
+- **Circuits**: Complete circuits for specific operations
+- **Utils**: Helper functions and utilities
+- **Binaries**: Command-line tools for various operations
 
-# Verify a proof
-./target/release/wire verify --circuit wrapped_asset_mint --proof mint_proof.json --verbose
+All components are designed to be auditable, with explicit witness assignments and public APIs.
 
-# Aggregate multiple proofs
-./target/release/wire aggregate --proofs proof1.json,proof2.json,proof3.json --output aggregated.json
-```
+## Contributing
 
-#### WebAssembly API
+Contributions are welcome! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-```javascript
-import * as wire from 'wire';
+## License
 
-// Generate a keypair with mnemonic
-const keypairWithMnemonic = wire.generate_keypair_with_mnemonic(24);
-console.log(keypairWithMnemonic.mnemonic); // Save this securely!
-
-// Create a proof
-const proof = wire.prove_wrapped_asset_mint(attestationData, custodianPk);
-
-// Verify a proof
-const isValid = wire.verify_proof(proof, "WrappedAssetMint");
-```
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Project Structure
 
@@ -175,17 +182,3 @@ See `docs/mpc_interaction.md` and `docs/mpc_key_management.md` for details.
 - Extensive fuzz testing of all components
 
 See `docs/security_review.md` for the full security analysis.
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
-
-## Contributing
-
-Contributions are welcome! Please feel free to submit a Pull Request.
-
-1. Fork the repository
-2. Create your feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add some amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
