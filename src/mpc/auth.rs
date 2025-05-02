@@ -3,7 +3,7 @@
 // This module provides multi-factor authentication for MPC operators.
 
 use crate::mpc::{MPCError, MPCResult};
-use hmac::{Hmac, Mac};
+use hmac::{Hmac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use pbkdf2::pbkdf2;

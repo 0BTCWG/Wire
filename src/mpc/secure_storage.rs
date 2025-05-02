@@ -6,7 +6,7 @@ use crate::mpc::{MPCError, MPCResult};
 use crate::mpc::core::KeyShare;
 use aes_gcm::{Aes256Gcm, KeyInit};
 use aes_gcm::aead::Aead;
-use hmac::{Hmac, Mac};
+use hmac::{Hmac};
 use rand::{rngs::OsRng, RngCore};
 use sha2::Sha256;
 use pbkdf2::pbkdf2;

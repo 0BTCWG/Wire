@@ -384,7 +384,7 @@ pub fn create_merkle_proof_target<F: RichField + Extendable<D>, const D: usize>(
 mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2_field::types::Field;

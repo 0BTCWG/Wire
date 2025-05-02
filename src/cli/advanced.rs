@@ -1,11 +1,10 @@
-// Advanced CLI features for the 0BTC Wire system
-use clap::{Parser, Subcommand};
-use log::{info};
-use std::path::{PathBuf};
+// Advanced CLI commands for the 0BTC Wire system
+use clap::Subcommand;
+use std::path::PathBuf;
+use log::info;
 
-use crate::cli::config::{WireConfig};
+use crate::cli::config;
 use crate::cli::commands::{CommandOptions, execute_config_command, execute_batch_command, execute_workflow_command};
-use wire_lib::errors::{ValidationError, WireError, WireResult};
 
 /// Advanced CLI commands for 0BTC Wire
 #[derive(Subcommand)]
@@ -164,7 +163,7 @@ pub fn example_integration() {
 
 /// Create an example configuration file
 pub fn create_example_config() -> Result<(), String> {
-    let config = WireConfig::default();
+    let config = config::WireConfig::default();
     config.save(PathBuf::from("wire_config_example.json"))
         .map_err(|e| format!("Failed to create example configuration: {}", e))?;
     

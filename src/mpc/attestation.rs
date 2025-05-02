@@ -6,7 +6,7 @@
 use crate::mpc::{MPCCore, MPCError, MPCResult};
 use crate::mpc::ceremonies::{SigningCeremony, Ceremony};
 use crate::mpc::bitcoin::BitcoinDeposit;
-use ed25519_dalek::Verifier;
+use ed25519_dalek::{Signature, VerifyingKey, Verifier};
 use serde::{Deserialize, Serialize};
 use serde_arrays;
 use std::collections::HashMap;
@@ -106,9 +106,6 @@ impl MintAttestation {
     
     /// Verify the attestation signature
     pub fn verify(&self, public_key: &[u8; 32]) -> bool {
-        // Import the specific types we need from ed25519-dalek
-        use ed25519_dalek::{Signature, VerifyingKey, Verifier};
-        
         let signing_bytes = self.to_signing_bytes();
         
         // Try to convert the public key bytes to a VerifyingKey

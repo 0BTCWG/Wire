@@ -4,7 +4,7 @@
 // to manage distributed key generation, mint attestations, burn processing,
 // and fee consolidation.
 
-use wire_lib::mpc::{self, MPCConfig, MPCResult};
+use wire_lib::mpc::{self, MPCResult};
 use std::process;
 
 fn main() {

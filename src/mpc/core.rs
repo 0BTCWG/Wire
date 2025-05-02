@@ -128,7 +128,7 @@ impl MPCCore {
     }
     
     /// Create a signature share for the given message
-    pub fn create_signature_share(&self, message: &[u8]) -> MPCResult<SignatureShare> {
+    pub fn create_signature_share(&self, _message: &[u8]) -> MPCResult<SignatureShare> {
         let _key_share = self.key_share.as_ref()
             .ok_or_else(|| MPCError::InternalError("No key share available".to_string()))?;
         
@@ -139,7 +139,7 @@ impl MPCCore {
     }
     
     /// Combine signature shares into a complete signature
-    pub fn combine_signature_shares(&self, shares: Vec<SignatureShare>, message: &[u8]) -> MPCResult<Ed25519Signature> {
+    pub fn combine_signature_shares(&self, shares: Vec<SignatureShare>, _message: &[u8]) -> MPCResult<Ed25519Signature> {
         if shares.len() < self.config.threshold {
             return Err(MPCError::ThresholdNotMet {
                 required: self.config.threshold,

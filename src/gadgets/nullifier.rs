@@ -214,9 +214,9 @@ mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
-    use plonky2::iop::witness::{PartialWitness, WitnessWrite};
+    use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     
     type F = GoldilocksField;
     type C = PoseidonGoldilocksConfig;

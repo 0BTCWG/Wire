@@ -198,8 +198,8 @@ mod tests {
         
         // Test case 1: a == b (5 == 5)
         let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(5));
-        pw.set_target(b, F::from_canonical_u64(5));
+        let _ = pw.set_target(a, F::from_canonical_u64(5));
+        let _ = pw.set_target(b, F::from_canonical_u64(5));
         
         let proof = circuit.prove(pw).unwrap();
         let public_inputs = proof.public_inputs;
@@ -209,8 +209,8 @@ mod tests {
         
         // Test case 2: a != b (5 != 10)
         let mut pw = PartialWitness::new();
-        pw.set_target(a, F::from_canonical_u64(5));
-        pw.set_target(b, F::from_canonical_u64(10));
+        let _ = pw.set_target(a, F::from_canonical_u64(5));
+        let _ = pw.set_target(b, F::from_canonical_u64(10));
         
         let proof = circuit.prove(pw).unwrap();
         let public_inputs = proof.public_inputs;

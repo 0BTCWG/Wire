@@ -406,12 +406,12 @@ pub fn count_signature_verification_gates<F: RichField + Extendable<D>, const D:
     
     // Create dummy inputs for signature verification
     let message_len = 32;
-    let mut message = Vec::with_capacity(message_len);
+    let mut _message = Vec::with_capacity(message_len);
     for _ in 0..message_len {
-        message.push(builder.add_virtual_target());
+        _message.push(builder.add_virtual_target());
     }
     
-    let signature = SignatureTarget {
+    let _signature = SignatureTarget {
         r_point: PointTarget {
             x: builder.add_virtual_target(),
             y: builder.add_virtual_target(),
@@ -419,7 +419,7 @@ pub fn count_signature_verification_gates<F: RichField + Extendable<D>, const D:
         s_scalar: builder.add_virtual_target(),
     };
     
-    let public_key = PublicKeyTarget {
+    let _public_key = PublicKeyTarget {
         point: PointTarget {
             x: builder.add_virtual_target(),
             y: builder.add_virtual_target(),
@@ -427,7 +427,7 @@ pub fn count_signature_verification_gates<F: RichField + Extendable<D>, const D:
     };
     
     // Verify the signature
-    let _ = verify_message_signature(builder, &message, &signature, &public_key);
+    let _ = verify_message_signature(builder, &_message, &_signature, &_public_key);
     
     let end_gates = builder.num_gates();
     Ok(end_gates - start_gates)
@@ -455,37 +455,37 @@ pub fn count_batch_signature_verification_gates<F: RichField + Extendable<D>, co
     
     // Create dummy inputs for batch signature verification
     let message_len = 32;
-    let mut messages = Vec::with_capacity(batch_size);
-    let mut signatures = Vec::with_capacity(batch_size);
-    let mut public_keys = Vec::with_capacity(batch_size);
+    let mut _messages = Vec::with_capacity(batch_size);
+    let mut _signatures = Vec::with_capacity(batch_size);
+    let mut _public_keys = Vec::with_capacity(batch_size);
     
     for _ in 0..batch_size {
-        let mut message = Vec::with_capacity(message_len);
+        let mut _message = Vec::with_capacity(message_len);
         for _ in 0..message_len {
-            message.push(builder.add_virtual_target());
+            _message.push(builder.add_virtual_target());
         }
-        messages.push(message);
+        _messages.push(_message);
         
-        let signature = SignatureTarget {
+        let _signature = SignatureTarget {
             r_point: PointTarget {
                 x: builder.add_virtual_target(),
                 y: builder.add_virtual_target(),
             },
             s_scalar: builder.add_virtual_target(),
         };
-        signatures.push(signature);
+        _signatures.push(_signature);
         
-        let public_key = PublicKeyTarget {
+        let _public_key = PublicKeyTarget {
             point: PointTarget {
                 x: builder.add_virtual_target(),
                 y: builder.add_virtual_target(),
             },
         };
-        public_keys.push(public_key);
+        _public_keys.push(_public_key);
     }
     
     // Run batch signature verification
-    let _ = batch_verify_signatures(builder, &messages, &signatures, &public_keys);
+    let _ = batch_verify_signatures(builder, &_messages, &_signatures, &_public_keys);
     
     let end_gates = builder.num_gates();
     Ok(end_gates - start_gates)
@@ -495,7 +495,7 @@ pub fn count_batch_signature_verification_gates<F: RichField + Extendable<D>, co
 mod tests {
     use super::*;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2_field::types::Field;
@@ -509,14 +509,14 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         
         // Create a message
-        let message = vec![
+        let _message = vec![
             builder.constant(F::from_canonical_u64(1)),
             builder.constant(F::from_canonical_u64(2)),
             builder.constant(F::from_canonical_u64(3)),
         ];
         
         // Create a signature (using fixed test values)
-        let sig = SignatureTarget {
+        let _sig = SignatureTarget {
             r_point: PointTarget {
                 x: builder.constant(F::from_canonical_u64(123)),
                 y: builder.constant(F::from_canonical_u64(456)),
@@ -525,7 +525,7 @@ mod tests {
         };
         
         // Create a public key (using fixed test values)
-        let pk = PublicKeyTarget {
+        let _pk = PublicKeyTarget {
             point: PointTarget {
                 x: builder.constant(F::from_canonical_u64(101)),
                 y: builder.constant(F::from_canonical_u64(202)),
@@ -559,14 +559,14 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
         
         // Create a message
-        let message = vec![
+        let _message = vec![
             builder.constant(F::from_canonical_u64(1)),
             builder.constant(F::from_canonical_u64(2)),
             builder.constant(F::from_canonical_u64(3)),
         ];
         
         // Create a signature (using fixed test values)
-        let sig = SignatureTarget {
+        let _sig = SignatureTarget {
             r_point: PointTarget {
                 x: builder.constant(F::from_canonical_u64(123)),
                 y: builder.constant(F::from_canonical_u64(456)),
@@ -576,7 +576,7 @@ mod tests {
         
         // Create a public key (using fixed test values)
         // For an invalid test, we use a different public key that doesn't match the signature
-        let pk = PublicKeyTarget {
+        let _pk = PublicKeyTarget {
             point: PointTarget {
                 x: builder.constant(F::from_canonical_u64(303)), // Different from valid test
                 y: builder.constant(F::from_canonical_u64(404)), // Different from valid test
@@ -608,10 +608,10 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(Default::default());
         
         // Create an empty message
-        let message = Vec::new();
+        let _message = Vec::new();
         
         // Create dummy signature and public key
-        let signature = SignatureTarget {
+        let _signature = SignatureTarget {
             r_point: PointTarget {
                 x: builder.add_virtual_target(),
                 y: builder.add_virtual_target(),
@@ -619,7 +619,7 @@ mod tests {
             s_scalar: builder.add_virtual_target(),
         };
         
-        let public_key = PublicKeyTarget {
+        let _public_key = PublicKeyTarget {
             point: PointTarget {
                 x: builder.add_virtual_target(),
                 y: builder.add_virtual_target(),
@@ -627,7 +627,7 @@ mod tests {
         };
         
         // Verify the signature - should return an error
-        let result = verify_message_signature(&mut builder, &message, &signature, &public_key);
+        let result = verify_message_signature(&mut builder, &_message, &_signature, &_public_key);
         assert!(result != builder.one());
         
         // Since we're expecting an error, we should check if the result is a specific error value

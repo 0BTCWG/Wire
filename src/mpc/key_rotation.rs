@@ -135,7 +135,7 @@ impl KeyRotationManager {
         &mut self,
         reason: &str,
         old_key_share: &KeyShare,
-        password: &str,
+        _password: &str,
     ) -> MPCResult<DKGCeremony> {
         // Check if a rotation is already in progress
         if let Some(rotation) = &self.current_rotation {

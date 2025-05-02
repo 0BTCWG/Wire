@@ -324,10 +324,10 @@ pub fn verify_proofs_in_parallel<F: RichField + Extendable<D>, C: GenericConfig<
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::proof::SerializableProof;
+    
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
-    use plonky2::iop::target::Target;
+    
     use plonky2::iop::witness::PartialWitness;
     use plonky2::iop::witness::WitnessWrite;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -363,8 +363,8 @@ mod tests {
         
         for i in 0..num_proofs {
             let mut pw = PartialWitness::new();
-            pw.set_target(pub_input, F::from_canonical_u64(i as u64));
-            pw.set_target(priv_input, F::from_canonical_u64(i as u64));
+            let _ = pw.set_target(pub_input, F::from_canonical_u64(i as u64));
+            let _ = pw.set_target(priv_input, F::from_canonical_u64(i as u64));
             witnesses.push(pw);
         }
         

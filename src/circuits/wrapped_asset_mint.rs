@@ -204,7 +204,7 @@ impl WrappedAssetMintCircuit {
         };
         
         // Create the circuit
-        let circuit = WrappedAssetMintCircuit {
+        let _circuit = WrappedAssetMintCircuit {
             custodian_pk: custodian_pk.clone(),
             attestation: attestation.clone(),
         };
@@ -253,9 +253,48 @@ mod tests {
     
     #[test]
     fn test_wrapped_asset_mint() {
-        // This is a placeholder test
-        // In a real implementation, this would test the circuit with actual inputs
-        let circuit_data = WrappedAssetMintCircuit::create_circuit();
+        // Create a simple test circuit
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Add inputs
+        let _input_btc_tx_hash = builder.add_virtual_target();
+        let input_btc_tx_index = builder.add_virtual_target();
+        let _input_btc_tx_amount = builder.add_virtual_target();
+        let input_btc_tx_address = builder.add_virtual_targets(20); // P2PKH address is 20 bytes
+        let receiver_pk = PublicKeyTarget {
+            point: crate::core::PointTarget {
+                x: builder.add_virtual_target(),
+                y: builder.add_virtual_target(),
+            }
+        };
+        let _asset_id = builder.add_virtual_targets(32); // 32 bytes for asset ID
+        let amount = builder.add_virtual_target();
+        let _salt = builder.add_virtual_targets(32); // 32 bytes for salt
+        
+        // Create the circuit
+        let _circuit = WrappedAssetMintCircuit {
+            custodian_pk: receiver_pk,
+            attestation: SignedAttestationTarget {
+                recipient_pk_hash: input_btc_tx_address,
+                amount,
+                deposit_nonce: input_btc_tx_index,
+                signature: SignatureTarget {
+                    r_point: crate::core::PointTarget {
+                        x: builder.add_virtual_target(),
+                        y: builder.add_virtual_target(),
+                    },
+                    s_scalar: builder.add_virtual_target(),
+                },
+            },
+        };
+        
+        // Build the circuit
+        _circuit.build(&mut builder);
+        
+        // Build the circuit data
+        let circuit_data = builder.build::<PoseidonGoldilocksConfig>();
+        
         assert!(circuit_data.common.num_public_inputs > 0);
     }
 }

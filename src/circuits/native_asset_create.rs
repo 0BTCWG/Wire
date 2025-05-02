@@ -283,27 +283,27 @@ impl NativeAssetCreateCircuit {
         let mut pw = PartialWitness::new();
         
         // Set creator public key
-        pw.set_target(circuit.creator_pk.point.x, GoldilocksField::from_canonical_u64(creator_pk_x));
-        pw.set_target(circuit.creator_pk.point.y, GoldilocksField::from_canonical_u64(creator_pk_y));
+        let _ = pw.set_target(circuit.creator_pk.point.x, GoldilocksField::from_canonical_u64(creator_pk_x));
+        let _ = pw.set_target(circuit.creator_pk.point.y, GoldilocksField::from_canonical_u64(creator_pk_y));
         
         // Set asset parameters
-        pw.set_target(circuit.asset_nonce, GoldilocksField::from_canonical_u64(asset_nonce));
-        pw.set_target(circuit.decimals, GoldilocksField::from_canonical_u64(decimals));
-        pw.set_target(circuit.max_supply, GoldilocksField::from_canonical_u64(max_supply));
-        pw.set_target(
+        let _ = pw.set_target(circuit.asset_nonce, GoldilocksField::from_canonical_u64(asset_nonce));
+        let _ = pw.set_target(circuit.decimals, GoldilocksField::from_canonical_u64(decimals));
+        let _ = pw.set_target(circuit.max_supply, GoldilocksField::from_canonical_u64(max_supply));
+        let _ = pw.set_target(
             circuit.is_mintable, 
             GoldilocksField::from_canonical_u64(if is_mintable { 1 } else { 0 })
         );
         
         // Set signature
-        pw.set_target(circuit.signature.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
-        pw.set_target(circuit.signature.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
-        pw.set_target(circuit.signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
+        let _ = pw.set_target(circuit.signature.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
+        let _ = pw.set_target(circuit.signature.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
+        let _ = pw.set_target(circuit.signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
         
         // Set fee input UTXO values
         for (i, byte) in fee_owner_pubkey_hash.iter().enumerate() {
             if i < circuit.fee_input_utxo.owner_pubkey_hash_target.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(*byte as u64),
                 );
@@ -312,18 +312,18 @@ impl NativeAssetCreateCircuit {
         
         for (i, byte) in fee_asset_id.iter().enumerate() {
             if i < circuit.fee_input_utxo.asset_id_target.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(*byte as u64),
                 );
             }
         }
         
-        pw.set_target(circuit.fee_input_utxo.amount_target, GoldilocksField::from_canonical_u64(*fee_amount_value));
+        let _ = pw.set_target(circuit.fee_input_utxo.amount_target, GoldilocksField::from_canonical_u64(*fee_amount_value));
         
         for (i, byte) in fee_salt.iter().enumerate() {
             if i < circuit.fee_input_utxo.salt_target.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.salt_target[i],
                     GoldilocksField::from_canonical_u64(*byte as u64),
                 );
@@ -331,12 +331,12 @@ impl NativeAssetCreateCircuit {
         }
         
         // Set fee amount
-        pw.set_target(circuit.fee_amount, GoldilocksField::from_canonical_u64(fee_amount));
+        let _ = pw.set_target(circuit.fee_amount, GoldilocksField::from_canonical_u64(fee_amount));
         
         // Set fee reservoir address hash
         for (i, byte) in fee_reservoir_address_hash.iter().enumerate() {
             if i < circuit.fee_reservoir_address_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_reservoir_address_hash[i],
                     GoldilocksField::from_canonical_u64(*byte as u64),
                 );

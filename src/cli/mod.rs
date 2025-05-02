@@ -2,27 +2,18 @@
 use clap::{Parser, Subcommand};
 use log::{info, warn};
 use std::fs;
-use std::path::{Path};
+use std::path::Path;
 
 use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2_field::types::Field;
+use plonky2::field::types::Field;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use wire_lib::core::UTXO;
 use wire_lib::core::proof::SerializableProof;
-use wire_lib::utils::recursive_prover::{
-    aggregate_proofs,
-    verify_aggregated_proof,
-    RecursiveProverOptions,
+use wire_lib::utils::parallel_prover::{
+    generate_proofs_in_parallel,
+    verify_proofs_in_parallel,
 };
-use wire_lib::utils::wallet::{Wallet, WordCount};
-use wire_lib::circuits::{
-    WrappedAssetMintCircuit, 
-    WrappedAssetBurnCircuit, 
-    TransferCircuit,
-    NativeAssetCreateCircuit,
-    NativeAssetMintCircuit,
-    NativeAssetBurnCircuit
-};
+use wire_lib::utils::wallet::WordCount;
 
 // Import the validation module
 pub mod validation;
@@ -32,10 +23,7 @@ use validation::{
     validate_output_file_path,
     validate_circuit_type,
     validate_batch_size,
-    validate_json_file,
-    validate_proof_file,
     validate_proof_directory,
-    ValidationError,
 };
 
 // Import advanced CLI modules
@@ -158,10 +146,7 @@ pub enum Commands {
     },
     /// Advanced CLI commands for configuration, batch processing, and workflows
     #[command(subcommand, about = "Advanced CLI commands")]
-    Advanced {
-        #[command(subcommand)]
-        command: AdvancedCommands,
-    },
+    Advanced(AdvancedCommands),
 }
 
 /// Parse command line arguments and execute the appropriate command
@@ -178,13 +163,13 @@ pub fn execute_command(command: &Cli) -> Result<(), String> {
         Commands::VerifyAggregated { proof, circuit, verbose } => {
             verify_aggregated_proof_cli(proof, circuit, *verbose)
         }
-        Commands::Advanced { command } => execute_advanced_command(command),
+        Commands::Advanced(command) => execute_advanced_command(command),
     }
 }
 
 /// Generate a new keypair for use with 0BTC Wire
 pub fn generate_keypair(output: &Option<String>, words: usize, mnemonic: &Option<String>, path: &Option<String>) -> Result<(), String> {
-    use wire_lib::utils::wallet::{Wallet, WalletError, DEFAULT_DERIVATION_PATH};
+    use wire_lib::utils::wallet::Wallet;
     
     info!("Generating new keypair with HD wallet support");
     
@@ -304,7 +289,7 @@ pub fn prove_circuit(circuit_type: &str, input_path: &str, output_path: &str, us
     };
     
     // Parse the input JSON
-    let input_data: serde_json::Value = match serde_json::from_str(&input_json) {
+    let _input_data: serde_json::Value = match serde_json::from_str(&input_json) {
         Ok(data) => data,
         Err(e) => return Err(format!("Failed to parse input JSON: {}", e)),
     };
@@ -377,13 +362,13 @@ pub fn verify_proof(circuit_type: &str, proof_path: &str, verbose: bool) -> Resu
     };
     
     // Parse the proof JSON
-    let proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
+    let _proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
         Ok(data) => data,
         Err(e) => return Err(format!("Failed to parse proof JSON: {}", e)),
     };
     
     // Verify the proof structure
-    match verify_proof_structure(&proof_data) {
+    match verify_proof_structure(&_proof_data) {
         Ok(true) => {
             if verbose {
                 info!("Proof structure is valid");
@@ -441,7 +426,7 @@ pub fn verify_aggregated_proof_cli(proof_path: &str, circuit_type: &str, verbose
     };
     
     // Parse the proof JSON
-    let proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
+    let _proof_data: serde_json::Value = match serde_json::from_str(&proof_json) {
         Ok(data) => data,
         Err(e) => return Err(format!("Failed to parse proof JSON: {}", e)),
     };
@@ -469,7 +454,7 @@ pub fn verify_aggregated_proof_cli(proof_path: &str, circuit_type: &str, verbose
 }
 
 /// Aggregate multiple proofs into a single proof
-pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usize, verbose: bool) -> Result<(), String> {
+pub fn aggregate_proofs_cli(input_dir: &str, output_path: &str, batch_size: usize, _verbose: bool) -> Result<(), String> {
     // Validate the input directory
     let input_dir_path = match validate_directory_path(input_dir, true) {
         Ok(path) => path,

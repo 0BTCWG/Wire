@@ -55,7 +55,7 @@ pub fn execute_batch_command(
 ) -> WireResult<()> {
     // Load configuration
     let config = match &options.config_path {
-        Some(path) => WireConfig::load(path)?,
+        Some(path) => WireConfig::load(Path::new(path))?,
         None => WireConfig::default(),
     };
     
@@ -85,7 +85,7 @@ pub fn execute_workflow_command(
 ) -> WireResult<()> {
     // Load configuration
     let config = match &options.config_path {
-        Some(path) => WireConfig::load(path)?,
+        Some(path) => WireConfig::load(Path::new(path))?,
         None => {
             return Err(WireError::ValidationError(ValidationError::InputValidationError(
                 "Configuration file is required for workflow execution".to_string()
@@ -152,7 +152,7 @@ pub fn execute_verify_command(
 ) -> WireResult<()> {
     // Load configuration
     let config = match &options.config_path {
-        Some(path) => WireConfig::load(path)?,
+        Some(path) => WireConfig::load(Path::new(path))?,
         None => WireConfig::default(),
     };
     

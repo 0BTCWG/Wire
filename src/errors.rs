@@ -22,6 +22,9 @@ pub enum WireError {
     // Validation errors
     ValidationError(ValidationError),
     
+    // Batch processing errors
+    BatchProcessingError(String),
+    
     // Generic errors
     GenericError(String),
 }
@@ -34,6 +37,7 @@ impl fmt::Display for WireError {
             WireError::IOError(e) => write!(f, "I/O error: {}", e),
             WireError::ProofError(e) => write!(f, "Proof error: {}", e),
             WireError::ValidationError(e) => write!(f, "Validation error: {}", e),
+            WireError::BatchProcessingError(e) => write!(f, "Batch processing error: {}", e),
             WireError::GenericError(e) => write!(f, "{}", e),
         }
     }
@@ -320,6 +324,9 @@ pub fn sanitize_error_message(error: &WireError) -> String {
             CircuitError::NativeAssetMintError(_) => "NativeAssetMint circuit operation failed".to_string(),
             CircuitError::NativeAssetBurnError(_) => "NativeAssetBurn circuit operation failed".to_string(),
         },
+        
+        // For batch processing errors, provide generic messages
+        WireError::BatchProcessingError(_) => "Batch processing failed".to_string(),
         
         // For generic errors, sanitize to remove potential sensitive information
         WireError::GenericError(e) => {
