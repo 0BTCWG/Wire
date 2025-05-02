@@ -223,24 +223,44 @@ The `asset_params.json` file should include:
 
 ### Configuration
 
-The `wire advanced config` commands manage configuration:
+The Wire system can be configured using a JSON configuration file. You can create a default configuration file using:
 
 ```bash
-# Initialize a default configuration
-wire advanced config init --output wire_config.json
-
-# Show the current configuration
-wire advanced config show --config wire_config.json
+wire config --create --output wire_config.json
 ```
+
+The configuration file includes settings for:
+- Circuit parameters
+- Proof generation options
+- Batch processing options
+- Logging settings
 
 ### Batch Processing
 
-The `wire advanced batch` commands process batches of proofs:
+The batch processing feature allows you to verify multiple proofs in parallel, improving throughput for verification operations. This is especially useful for validators and operators who need to process many proofs efficiently.
 
 ```bash
-# Process a batch of proofs
-wire advanced batch process --input-dir inputs/ --output-dir outputs/ --circuit transfer --config wire_config.json
+wire batch --config batch_config.json --input-dir proofs/ --output-dir verified_proofs/
 ```
+
+The batch configuration file should include:
+
+```json
+{
+  "batch_size": 10,
+  "circuit_type": "transfer",
+  "parallel": true,
+  "threads": 4
+}
+```
+
+Key parameters:
+- `batch_size`: Number of proofs to process in each batch
+- `circuit_type`: Type of circuit to verify (must be the same for all proofs in the batch)
+- `parallel`: Whether to use parallel verification (recommended for better performance)
+- `threads`: Number of threads to use for parallel verification
+
+> **Note:** The batch processing now uses the improved parallel prover for verification, which significantly enhances performance on multi-core systems.
 
 ### Workflows
 

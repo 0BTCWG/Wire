@@ -26,12 +26,20 @@ May 1, 2025
 - **Bitcoin Fork Detection**: Automatic detection of Bitcoin network forks with adjustable confirmation thresholds
 - **Comprehensive Security Review**: Thorough security analysis with implemented recommendations
 
+### Performance Improvements
+
+- **Parallel Proof Generation**: Significantly improved proof generation performance using multi-threading
+- **Batch Verification**: Optimized batch verification of proofs for improved throughput
+- **Memory Optimization**: Reduced memory usage during proof generation and verification
+- **Compilation Improvements**: Fixed various compilation issues and warnings for better stability
+
 ### Operator Tooling
 
 - **MPC Operator CLI**: Command-line interface for MPC operators
 - **Ceremony Management**: Tools for managing DKG and signing ceremonies
 - **Monitoring**: Metrics and logging for operational visibility
 - **Backup and Recovery**: Tools for secure backup and recovery of key shares
+- **Enhanced Batch Processing**: Improved batch processing with better error handling and parallel verification
 
 ### Documentation
 
@@ -39,6 +47,7 @@ May 1, 2025
 - **Deployment Guide**: Comprehensive instructions for deploying MPC operator nodes
 - **Security Guidelines**: Best practices for secure operation
 - **Production Readiness**: Checklist for ensuring production readiness
+- **Updated User Guide**: Comprehensive guide for using the Wire CLI with the latest features
 
 ## Detailed Changes
 

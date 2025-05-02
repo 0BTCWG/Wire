@@ -69,6 +69,12 @@ Generate a proof for a circuit:
 wire prove --circuit transfer --input transfer_params.json --output transfer_proof.json
 ```
 
+For improved performance, use parallel processing:
+
+```bash
+wire prove --circuit transfer --input transfer_params.json --output transfer_proof.json --parallel
+```
+
 ### Verify a Proof
 
 Verify a proof:
@@ -83,6 +89,14 @@ Aggregate multiple proofs:
 
 ```bash
 wire aggregate --input-dir proofs/ --output aggregated_proof.json
+```
+
+### Batch Processing
+
+Process a batch of proofs:
+
+```bash
+wire batch --config batch_config.json --input-dir proofs/ --output-dir verified_proofs/
 ```
 
 ## Command Reference
@@ -116,6 +130,34 @@ wire prove --help
 # etc.
 ```
 
+## Configuration
+
+Create a configuration file:
+
+```bash
+wire config --create --output wire_config.json
+```
+
+## Advanced Features
+
+For advanced features and detailed usage instructions, please refer to the [User Guide](USER_GUIDE.md).
+
+## Troubleshooting
+
+If you encounter any issues:
+
+1. Ensure you're using the latest version of the software.
+2. Check that your input files are correctly formatted.
+3. For parallel processing issues, try reducing the number of threads or disabling parallelism.
+4. For memory-related errors, try using smaller batch sizes.
+
+## Notes for Developers
+
+- The codebase has been updated to fix various compilation issues and warnings.
+- All CLI commands now use the parallel prover for improved performance.
+- Batch processing has been optimized for better error handling and reliability.
+- For detailed information about recent fixes, see the [Compilation Fixes](docs/compilation_fixes.md) document.
+
 ## Documentation
 
 For more detailed instructions, refer to the following documentation:
@@ -131,3 +173,7 @@ If you encounter any issues, please:
 1. Check the [Troubleshooting](USER_GUIDE.md#troubleshooting) section in the User Guide
 2. File an issue on the [GitHub repository](https://github.com/0BTC/Wire/issues)
 3. Join our [community Discord](https://discord.gg/0btc) for assistance
+
+## License
+
+This software is licensed under the [MIT License](LICENSE).
