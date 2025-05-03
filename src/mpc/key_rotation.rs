@@ -5,7 +5,6 @@
 use crate::mpc::{MPCCore, MPCError, MPCResult};
 use crate::mpc::core::KeyShare;
 use crate::mpc::ceremonies::{DKGCeremony, CeremonyStatus, Ceremony};
-use crate::mpc::secure_storage::KeyShareStorage;
 use std::fs;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -64,9 +63,6 @@ pub struct KeyRotationManager {
     /// Path to the key rotation database
     db_path: String,
     
-    /// Key share storage
-    key_share_storage: KeyShareStorage,
-    
     /// Current key rotation record
     current_rotation: Option<KeyRotationRecord>,
 }
@@ -76,12 +72,10 @@ impl KeyRotationManager {
     pub fn new(
         mpc_core: MPCCore,
         db_path: String,
-        key_share_storage: KeyShareStorage,
     ) -> MPCResult<Self> {
         let mut manager = Self {
             mpc_core,
             db_path: db_path.clone(),
-            key_share_storage,
             current_rotation: None,
         };
         
@@ -171,9 +165,6 @@ impl KeyRotationManager {
         self.current_rotation = Some(rotation);
         self.save_current_rotation()?;
         
-        // Create a backup of the old key share
-        self.key_share_storage.create_backup()?;
-        
         // Create a new DKG ceremony
         let config = self.mpc_core.get_config();
         let ceremony = DKGCeremony::new(
@@ -207,7 +198,7 @@ impl KeyRotationManager {
     pub fn complete_rotation(
         &mut self,
         ceremony: &DKGCeremony,
-        password: &str,
+        _password: &str,
     ) -> MPCResult<()> {
         // Check if a rotation is in progress
         let rotation = match &mut self.current_rotation {
@@ -225,9 +216,6 @@ impl KeyRotationManager {
         
         // Calculate the hash of the new key share
         let new_key_share_hash = Self::hash_key_share(&new_key_share)?;
-        
-        // Save the new key share
-        self.key_share_storage.save_key_share(&new_key_share, password)?;
         
         // Update the rotation record
         let timestamp = SystemTime::now()

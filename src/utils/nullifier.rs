@@ -34,6 +34,35 @@ pub struct UTXOTarget {
     pub salt_target: Vec<Target>,
 }
 
+impl UTXOTarget {
+    /// Create a new UTXOTarget with virtual targets
+    pub fn add_virtual<F: RichField + Extendable<D>, const D: usize>(
+        builder: &mut CircuitBuilder<F, D>,
+        hash_size: usize,
+    ) -> Self {
+        let owner_pubkey_hash_target = (0..hash_size)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+            
+        let asset_id_target = (0..hash_size)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+            
+        let amount_target = vec![builder.add_virtual_target()];
+        
+        let salt_target = (0..hash_size)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+            
+        Self {
+            owner_pubkey_hash_target,
+            asset_id_target,
+            amount_target,
+            salt_target,
+        }
+    }
+}
+
 /// Computes the commitment hash for a UTXO
 pub fn compute_utxo_hash<F: RichField>(utxo: &UTXO<F>) -> F {
     compute_utxo_commitment(

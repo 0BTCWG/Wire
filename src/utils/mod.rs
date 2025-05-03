@@ -9,6 +9,7 @@ pub mod signature;
 pub mod merkle;
 pub mod nullifier;
 pub mod wallet;
+pub mod compare;
 // Temporarily disable the memory_efficient module to focus on fixing core functionality
 // pub mod memory_efficient;
 

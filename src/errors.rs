@@ -75,6 +75,12 @@ impl From<CryptoError> for WireError {
     }
 }
 
+impl From<crate::mpc::MPCError> for WireError {
+    fn from(error: crate::mpc::MPCError) -> Self {
+        WireError::GenericError(format!("MPC error: {}", error))
+    }
+}
+
 /// Cryptographic error types
 #[derive(Debug)]
 pub enum CryptoError {

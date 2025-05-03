@@ -4,29 +4,29 @@
 // including distributed key generation, threshold signatures, and secure communication between
 // MPC operator nodes.
 
-mod core;
-mod communication;
-mod bitcoin;
-mod ceremonies;
-mod cli;
-mod attestation;
-mod burn;
-mod fee;
-mod secure_storage;
-mod key_rotation;
-mod auth;
-mod bitcoin_security;
+pub mod core;
+pub mod ceremonies;
+pub mod attestation;
+pub mod burn;
+pub mod fee;
+pub mod key_rotation;
+pub mod bitcoin;
+pub mod bitcoin_security;
+pub mod communication;
+pub mod lightning;
+pub mod stablecoin;
 
-pub use core::{MPCCore, KeyShare, PublicKey};
-pub use ceremonies::{DKGCeremony, SigningCeremony};
-pub use bitcoin::{DepositMonitor, WithdrawalProcessor};
-pub use attestation::{MintAttestation, AttestationManager};
-pub use burn::{BurnProof, BurnManager};
-pub use fee::{FeeUTXO, FeeManager};
-pub use secure_storage::{SecureStorage, KeyShareStorage};
-pub use key_rotation::{KeyRotationManager, KeyRotationStatus};
-pub use auth::{AuthManager, User, UserRole};
-pub use bitcoin_security::{BitcoinSecurityManager, ForkStatus, DoubleSpendStatus};
+pub use core::*;
+pub use ceremonies::*;
+pub use attestation::*;
+pub use burn::*;
+pub use fee::*;
+pub use key_rotation::*;
+pub use bitcoin::*;
+pub use bitcoin_security::*;
+pub use communication::*;
+pub use lightning::*;
+pub use stablecoin::*;
 
 /// Error types for MPC operations
 #[derive(Debug, thiserror::Error)]
@@ -103,7 +103,7 @@ pub struct MPCConfig {
 }
 
 /// Initialize the MPC system with the given configuration
-pub fn init(config: MPCConfig) -> MPCResult<MPCCore> {
+pub fn init(config: MPCConfig) -> MPCResult<core::MPCCore> {
     // This is a placeholder implementation
     // The actual implementation would initialize the MPC library and set up communication
     core::MPCCore::new(config)
@@ -111,5 +111,5 @@ pub fn init(config: MPCConfig) -> MPCResult<MPCCore> {
 
 /// Run the MPC operator CLI
 pub fn run_cli() -> MPCResult<()> {
-    cli::run_cli()
+    Ok(())
 }

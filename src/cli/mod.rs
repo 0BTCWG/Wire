@@ -32,6 +32,9 @@ pub mod batch;
 pub mod workflow;
 pub mod commands;
 pub mod advanced;
+pub mod amm;
+pub mod lightning;
+pub mod stablecoin;
 use advanced::{AdvancedCommands, execute_advanced_command};
 
 #[derive(Parser)]
@@ -147,6 +150,24 @@ pub enum Commands {
     /// Advanced CLI commands for configuration, batch processing, and workflows
     #[command(subcommand, about = "Advanced CLI commands")]
     Advanced(AdvancedCommands),
+    /// AMM commands
+    #[command(about = "AMM operations")]
+    AMM {
+        #[command(subcommand)]
+        command: AMMCommands,
+    },
+    /// Lightning Network commands
+    #[command(about = "Lightning Network operations")]
+    Lightning {
+        #[command(subcommand)]
+        command: LightningCommands,
+    },
+    /// Stablecoin commands
+    #[command(about = "Stablecoin operations")]
+    Stablecoin {
+        #[command(subcommand)]
+        command: StablecoinCommands,
+    },
 }
 
 /// Parse command line arguments and execute the appropriate command
@@ -164,6 +185,9 @@ pub fn execute_command(command: &Cli) -> Result<(), String> {
             verify_aggregated_proof_cli(proof, circuit, *verbose)
         }
         Commands::Advanced(command) => execute_advanced_command(command),
+        Commands::AMM { command } => execute_amm_command(&command),
+        Commands::Lightning { command } => execute_lightning_command(&command),
+        Commands::Stablecoin { command } => execute_stablecoin_command(&command),
     }
 }
 
@@ -759,5 +783,297 @@ fn create_dummy_circuit(circuit_type: &str) -> Result<plonky2::plonk::circuit_da
         _ => {
             Err(format!("Unsupported circuit type: {}", validated_circuit_type))
         }
+    }
+}
+
+#[derive(Subcommand)]
+pub enum LightningCommands {
+    /// Generate a Lightning Network invoice for receiving BTC
+    GenerateInvoice {
+        /// Amount in satoshis
+        #[arg(short, long)]
+        amount: u64,
+        
+        /// Output file for the invoice
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Check the status of a Lightning Network payment
+    CheckPayment {
+        /// Payment hash to check
+        #[arg(short, long)]
+        payment_hash: String,
+    },
+    
+    /// Generate a mint proof for a Lightning Network payment
+    MintProof {
+        /// Path to the attestation file
+        #[arg(short, long)]
+        attestation: String,
+        
+        /// Output file for the proof
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Generate a burn proof for a Lightning Network withdrawal
+    BurnProof {
+        /// Path to the UTXO file
+        #[arg(short, long)]
+        utxo: String,
+        
+        /// Path to the invoice file
+        #[arg(short, long)]
+        invoice: String,
+        
+        /// Output file for the proof
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Submit a burn proof to the MPC operators
+    SubmitBurn {
+        /// Path to the proof file
+        #[arg(short, long)]
+        proof: String,
+        
+        /// Path to the invoice file
+        #[arg(short, long)]
+        invoice: String,
+    },
+}
+
+pub fn execute_lightning_command(command: &LightningCommands) -> Result<(), String> {
+    match command {
+        LightningCommands::GenerateInvoice { amount, output } => {
+            crate::cli::lightning::generate_ln_invoice(*amount, output)
+        },
+        LightningCommands::CheckPayment { payment_hash } => {
+            crate::cli::lightning::check_ln_payment_status(payment_hash)
+        },
+        LightningCommands::MintProof { attestation, output } => {
+            crate::cli::lightning::generate_ln_mint_proof(attestation, output)
+        },
+        LightningCommands::BurnProof { utxo, invoice, output } => {
+            crate::cli::lightning::generate_ln_burn_proof(utxo, invoice, output)
+        },
+        LightningCommands::SubmitBurn { proof, invoice } => {
+            crate::cli::lightning::submit_ln_burn_proof(proof, invoice)
+        },
+    }
+}
+
+#[derive(Subcommand)]
+pub enum AMMCommands {
+    /// Create a new liquidity pool
+    CreatePool {
+        /// Asset ID of token A
+        #[arg(short, long)]
+        token_a: String,
+        
+        /// Asset ID of token B
+        #[arg(short, long)]
+        token_b: String,
+        
+        /// Output file for the pool state
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Swap tokens in a liquidity pool
+    Swap {
+        /// Path to the input UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+        
+        /// Path to the pool state file
+        #[arg(short, long)]
+        pool_state: String,
+        
+        /// Asset ID of the output token
+        #[arg(short, long)]
+        output_asset_id: String,
+        
+        /// Minimum output amount
+        #[arg(short, long)]
+        min_output_amount: u64,
+        
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Add liquidity to a pool
+    AddLiquidity {
+        /// Path to the input UTXO A file
+        #[arg(short, long)]
+        input_utxo_a: String,
+        
+        /// Path to the input UTXO B file
+        #[arg(short, long)]
+        input_utxo_b: String,
+        
+        /// Path to the pool state file
+        #[arg(short, long)]
+        pool_state: String,
+        
+        /// Minimum LP tokens to mint
+        #[arg(short, long)]
+        min_lp_tokens: u64,
+        
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Remove liquidity from a pool
+    RemoveLiquidity {
+        /// Path to the LP share file
+        #[arg(short, long)]
+        lp_share: String,
+        
+        /// Path to the pool state file
+        #[arg(short, long)]
+        pool_state: String,
+        
+        /// Minimum token A amount to receive
+        #[arg(short, long)]
+        min_amount_a: u64,
+        
+        /// Minimum token B amount to receive
+        #[arg(short, long)]
+        min_amount_b: u64,
+        
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+}
+
+pub fn execute_amm_command(command: &AMMCommands) -> Result<(), String> {
+    match command {
+        AMMCommands::CreatePool { token_a, token_b, output } => {
+            crate::cli::amm::create_pool(token_a, token_b, output)
+        },
+        AMMCommands::Swap { input_utxo, pool_state, output_asset_id, min_output_amount, output } => {
+            crate::cli::amm::swap_tokens(input_utxo, pool_state, output_asset_id, *min_output_amount, output)
+        },
+        AMMCommands::AddLiquidity { input_utxo_a, input_utxo_b, pool_state, min_lp_tokens, output } => {
+            crate::cli::amm::add_liquidity(input_utxo_a, input_utxo_b, pool_state, *min_lp_tokens, output)
+        },
+        AMMCommands::RemoveLiquidity { lp_share, pool_state, min_amount_a, min_amount_b, output } => {
+            crate::cli::amm::remove_liquidity(lp_share, pool_state, *min_amount_a, *min_amount_b, output)
+        },
+    }
+}
+
+#[derive(Subcommand)]
+pub enum StablecoinCommands {
+    /// Generate a new price attestation
+    GeneratePriceAttestation {
+        /// Output file for the price attestation
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Get the latest price attestation
+    GetLatestPriceAttestation {
+        /// Output file for the price attestation
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Mint zUSD stablecoins
+    MintZUSD {
+        /// Path to the input wBTC UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+        
+        /// Path to the price attestation file
+        #[arg(short, long)]
+        price_attestation: String,
+        
+        /// Amount of zUSD to mint
+        #[arg(short, long)]
+        zusd_amount: u64,
+        
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Submit a redeem request
+    SubmitRedeemRequest {
+        /// User's public key hash (hex encoded)
+        #[arg(short, long)]
+        user_pkh: String,
+        
+        /// Amount of zUSD to redeem
+        #[arg(short, long)]
+        zusd_amount: u64,
+        
+        /// Output file for the request
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// List pending redeem requests
+    ListRedeemRequests,
+    
+    /// Process a redeem request
+    ProcessRedeemRequest {
+        /// Path to the redeem request file
+        #[arg(short, long)]
+        request_file: String,
+        
+        /// Output file for the attestation
+        #[arg(short, long)]
+        output: String,
+    },
+    
+    /// Redeem zUSD stablecoins
+    RedeemZUSD {
+        /// Path to the input zUSD UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+        
+        /// Path to the price attestation file
+        #[arg(short, long)]
+        price_attestation: String,
+        
+        /// Path to the redeem attestation file
+        #[arg(short, long)]
+        redeem_attestation: String,
+        
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+}
+
+pub fn execute_stablecoin_command(command: &StablecoinCommands) -> Result<(), String> {
+    match command {
+        StablecoinCommands::GeneratePriceAttestation { output } => {
+            crate::cli::stablecoin::generate_price_attestation(output)
+        },
+        StablecoinCommands::GetLatestPriceAttestation { output } => {
+            crate::cli::stablecoin::get_latest_price_attestation(output)
+        },
+        StablecoinCommands::MintZUSD { input_utxo, price_attestation, zusd_amount, output } => {
+            crate::cli::stablecoin::mint_zusd(input_utxo, price_attestation, *zusd_amount, output)
+        },
+        StablecoinCommands::SubmitRedeemRequest { user_pkh, zusd_amount, output } => {
+            crate::cli::stablecoin::submit_redeem_request(user_pkh, *zusd_amount, output)
+        },
+        StablecoinCommands::ListRedeemRequests => {
+            crate::cli::stablecoin::list_redeem_requests()
+        },
+        StablecoinCommands::ProcessRedeemRequest { request_file, output } => {
+            crate::cli::stablecoin::process_redeem_request(request_file, output)
+        },
+        StablecoinCommands::RedeemZUSD { input_utxo, price_attestation, redeem_attestation, output } => {
+            crate::cli::stablecoin::redeem_zusd(input_utxo, price_attestation, redeem_attestation, output)
+        },
     }
 }

@@ -212,7 +212,7 @@ fn process_batch_sequential(options: &BatchOptions, proof_files: &[PathBuf]) -> 
 }
 
 /// Process a single batch of proofs
-fn process_single_batch(options: &BatchOptions, batch: &[PathBuf], output_path: &Path) -> WireResult<()> {
+fn process_single_batch(options: &BatchOptions, batch: &[PathBuf], _output_path: &Path) -> WireResult<()> {
     debug!("Processing batch with {} proofs", batch.len());
     
     // Load proofs from files

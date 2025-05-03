@@ -165,12 +165,7 @@ impl NativeAssetBurnCircuit {
         // Create dummy inputs for testing
         let input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
-        let owner_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let owner_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         let burn_amount = builder.add_virtual_target();
         
@@ -183,13 +178,7 @@ impl NativeAssetBurnCircuit {
             .map(|_| builder.add_virtual_target())
             .collect();
         
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         
         let _circuit = NativeAssetBurnCircuit {
             input_utxo,
@@ -235,34 +224,13 @@ impl NativeAssetBurnCircuit {
         
         // Create the circuit instance
         let circuit = NativeAssetBurnCircuit {
-            input_utxo: UTXOTarget {
-                owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                amount_target: builder.add_virtual_target(),
-                salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            },
-            owner_pk: PublicKeyTarget {
-                point: crate::core::PointTarget {
-                    x: builder.add_virtual_target(),
-                    y: builder.add_virtual_target(),
-                },
-            },
+            input_utxo: UTXOTarget::add_virtual(&mut builder, 32),
+            owner_pk: PublicKeyTarget::add_virtual(&mut builder),
             burn_amount: builder.add_virtual_target(),
-            fee_input_utxo: UTXOTarget {
-                owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-                amount_target: builder.add_virtual_target(),
-                salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            },
+            fee_input_utxo: UTXOTarget::add_virtual(&mut builder, 32),
             fee_amount: builder.add_virtual_target(),
             fee_reservoir_address_hash: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            signature: SignatureTarget {
-                r_point: crate::core::PointTarget {
-                    x: builder.add_virtual_target(),
-                    y: builder.add_virtual_target(),
-                },
-                s_scalar: builder.add_virtual_target(),
-            },
+            signature: SignatureTarget::add_virtual(&mut builder),
         };
         
         // Build the circuit
@@ -390,28 +358,13 @@ impl NativeAssetBurnCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create the circuit instance
-        let input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-        };
+        let input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
-        let _owner_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let owner_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         let _burn_amount = builder.add_virtual_target();
         
-        let _fee_input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            asset_id_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
-        };
+        let _fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
         let _fee_amount = builder.add_virtual_target();
         
@@ -419,17 +372,11 @@ impl NativeAssetBurnCircuit {
             .map(|_| builder.add_virtual_target())
             .collect();
         
-        let _signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let _signature = SignatureTarget::add_virtual(&mut builder);
         
         let _circuit = NativeAssetBurnCircuit {
             input_utxo,
-            owner_pk: _owner_pk,
+            owner_pk,
             burn_amount: _burn_amount,
             fee_input_utxo: _fee_input_utxo,
             fee_amount: _fee_amount,
@@ -470,41 +417,19 @@ mod tests {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Add a simple input UTXO
-        let input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: builder.add_virtual_targets(20),
-            asset_id_target: builder.add_virtual_targets(32),
-            amount_target: builder.add_virtual_target(),
-            salt_target: builder.add_virtual_targets(32),
-        };
+        let input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
-        // Add a simple owner public key
-        let owner_pk = PublicKeyTarget {
-            point: PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            }
-        };
+        let owner_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         // Create the circuit
         let circuit = NativeAssetBurnCircuit {
             input_utxo,
             owner_pk,
             burn_amount: builder.add_virtual_target(),
-            fee_input_utxo: UTXOTarget {
-                owner_pubkey_hash_target: builder.add_virtual_targets(20),
-                asset_id_target: builder.add_virtual_targets(32),
-                amount_target: builder.add_virtual_target(),
-                salt_target: builder.add_virtual_targets(32),
-            },
+            fee_input_utxo: UTXOTarget::add_virtual(&mut builder, 32),
             fee_amount: builder.add_virtual_target(),
             fee_reservoir_address_hash: builder.add_virtual_targets(20),
-            signature: SignatureTarget {
-                r_point: PointTarget {
-                    x: builder.add_virtual_target(),
-                    y: builder.add_virtual_target(),
-                },
-                s_scalar: builder.add_virtual_target(),
-            },
+            signature: SignatureTarget::add_virtual(&mut builder),
         };
         
         // Just test that we can build the circuit without errors

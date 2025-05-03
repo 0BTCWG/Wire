@@ -25,7 +25,7 @@ mod signature_gate_count_tests {
         // Count the gates for a single signature verification
         let gates = count_signature_verification_gates(&mut builder);
         
-        println!("Single signature verification gate count: {}", gates);
+        println!("Single signature verification gate count: {:?}", gates);
         
         // Build the circuit to measure circuit creation time
         let start = Instant::now();
@@ -50,7 +50,7 @@ mod signature_gate_count_tests {
             // Count the gates for batch signature verification
             let gates = count_batch_signature_verification_gates(&mut builder, batch_size);
             
-            println!("Batch signature verification gate count (size {}): {}", batch_size, gates);
+            println!("Batch signature verification gate count (size {}): {:?}", batch_size, gates);
             println!("Average gates per signature in batch: {}", gates as f64 / batch_size as f64);
             
             // Only build the circuit for batch size 4 to save time

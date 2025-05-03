@@ -1,11 +1,12 @@
 use plonky2::field::goldilocks_field::GoldilocksField;
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::iop::witness::PartialWitness;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 use std::time::Instant;
 
-use wire::gadgets::signature::{count_signature_verification_gates, count_batch_signature_verification_gates};
+use wire_lib::gadgets::signature::{count_signature_verification_gates, count_batch_signature_verification_gates};
 
 type F = GoldilocksField;
 const D: usize = 2;

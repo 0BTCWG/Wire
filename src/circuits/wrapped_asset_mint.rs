@@ -98,12 +98,7 @@ impl WrappedAssetMintCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a custodian public key
-        let custodian_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let custodian_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         // Create a recipient public key hash
         let recipient_pk_hash: Vec<_> = (0..HASH_SIZE)
@@ -117,13 +112,7 @@ impl WrappedAssetMintCircuit {
         let deposit_nonce = builder.add_virtual_target();
         
         // Create a signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         
         // Create a signed attestation
         let attestation = SignedAttestationTarget {
@@ -168,12 +157,7 @@ impl WrappedAssetMintCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a custodian public key
-        let custodian_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let custodian_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         // Create a recipient public key hash
         let recipient_pk_hash_targets: Vec<_> = (0..HASH_SIZE)
@@ -187,13 +171,7 @@ impl WrappedAssetMintCircuit {
         let deposit_nonce_target = builder.add_virtual_target();
         
         // Create a signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         
         // Create a signed attestation
         let attestation = SignedAttestationTarget {
@@ -262,12 +240,7 @@ mod tests {
         let input_btc_tx_index = builder.add_virtual_target();
         let _input_btc_tx_amount = builder.add_virtual_target();
         let input_btc_tx_address = builder.add_virtual_targets(20); // P2PKH address is 20 bytes
-        let receiver_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            }
-        };
+        let receiver_pk = PublicKeyTarget::add_virtual(&mut builder);
         let _asset_id = builder.add_virtual_targets(32); // 32 bytes for asset ID
         let amount = builder.add_virtual_target();
         let _salt = builder.add_virtual_targets(32); // 32 bytes for salt
@@ -279,13 +252,7 @@ mod tests {
                 recipient_pk_hash: input_btc_tx_address,
                 amount,
                 deposit_nonce: input_btc_tx_index,
-                signature: SignatureTarget {
-                    r_point: crate::core::PointTarget {
-                        x: builder.add_virtual_target(),
-                        y: builder.add_virtual_target(),
-                    },
-                    s_scalar: builder.add_virtual_target(),
-                },
+                signature: SignatureTarget::add_virtual(&mut builder),
             },
         };
         

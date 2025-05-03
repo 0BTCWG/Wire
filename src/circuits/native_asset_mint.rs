@@ -164,12 +164,7 @@ impl NativeAssetMintCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a minter public key
-        let minter_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let minter_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         // Create an asset ID
         let asset_id: Vec<Target> = (0..32)
@@ -185,18 +180,7 @@ impl NativeAssetMintCircuit {
         let mint_amount = builder.add_virtual_target();
         
         // Create a fee input UTXO
-        let fee_input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            asset_id_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-        };
+        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
         // Create a fee amount
         let fee_amount = builder.add_virtual_target();
@@ -207,13 +191,7 @@ impl NativeAssetMintCircuit {
             .collect();
         
         // Create a signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         
         // Create the circuit
         let circuit = NativeAssetMintCircuit {
@@ -260,12 +238,7 @@ impl NativeAssetMintCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Set minter public key
-        let minter_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let minter_pk = PublicKeyTarget::add_virtual(&mut builder);
         let _ = pw.set_target(minter_pk.point.x, GoldilocksField::from_canonical_u64(minter_pk_x));
         let _ = pw.set_target(minter_pk.point.y, GoldilocksField::from_canonical_u64(minter_pk_y));
         
@@ -302,31 +275,14 @@ impl NativeAssetMintCircuit {
         let _ = pw.set_target(mint_amount_target, GoldilocksField::from_canonical_u64(mint_amount));
         
         // Set signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         let _ = pw.set_target(signature.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
         let _ = pw.set_target(signature.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
         let _ = pw.set_target(signature.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
         
         // Create fee input UTXO
         let (fee_owner_pubkey_hash, fee_asset_id, fee_amount_value, fee_salt) = &fee_input_utxo_data;
-        let fee_input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..fee_owner_pubkey_hash.len())
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            asset_id_target: (0..fee_asset_id.len())
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..fee_salt.len())
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-        };
+        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
         // Set fee input UTXO values
         for (i, byte) in fee_owner_pubkey_hash.iter().enumerate() {
@@ -423,12 +379,7 @@ impl NativeAssetMintCircuit {
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
         
         // Create a minter public key
-        let minter_pk = PublicKeyTarget {
-            point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-        };
+        let minter_pk = PublicKeyTarget::add_virtual(&mut builder);
         
         // Create an asset ID
         let asset_id: Vec<Target> = (0..32)
@@ -444,18 +395,7 @@ impl NativeAssetMintCircuit {
         let mint_amount = builder.add_virtual_target();
         
         // Create a fee input UTXO
-        let fee_input_utxo = UTXOTarget {
-            owner_pubkey_hash_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            asset_id_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-            amount_target: builder.add_virtual_target(),
-            salt_target: (0..32)
-                .map(|_| builder.add_virtual_target())
-                .collect(),
-        };
+        let fee_input_utxo = UTXOTarget::add_virtual(&mut builder, 32);
         
         // Create a fee amount
         let fee_amount = builder.add_virtual_target();
@@ -466,13 +406,7 @@ impl NativeAssetMintCircuit {
             .collect();
         
         // Create a signature
-        let signature = SignatureTarget {
-            r_point: crate::core::PointTarget {
-                x: builder.add_virtual_target(),
-                y: builder.add_virtual_target(),
-            },
-            s_scalar: builder.add_virtual_target(),
-        };
+        let signature = SignatureTarget::add_virtual(&mut builder);
         
         // Create the circuit
         let circuit = NativeAssetMintCircuit {

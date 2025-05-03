@@ -43,7 +43,10 @@ log = "0.4.19"
 env_logger = "0.10.0"
 thiserror = "1.0.44"
 anyhow = "1.0.75"
-chrono = "0.4.31"
+
+# Testing
+tempfile = "3.8.1"
+chrono = "0.4"
 
 # CLI
 clap = { version = "4.3.19", features = ["derive"] }
