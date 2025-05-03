@@ -6,8 +6,9 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use wire_lib::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
-use wire_lib::circuits::wrapped_asset_burn::{WrappedAssetBurnCircuit, SignedQuoteTarget};
+use wire_lib::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
+use wire_lib::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
+use wire_lib::gadgets::fee::SignedQuoteTarget;
 
 type F = GoldilocksField;
 type C = PoseidonGoldilocksConfig;
@@ -67,7 +68,7 @@ fn test_wrapped_asset_burn_basic() {
     };
     
     // Build the circuit
-    let _nullifier = circuit.build::<F, C, D>(&mut builder, sender_sk);
+    let _nullifier = circuit.build::<F, D>(&mut builder, sender_sk);
     
     // Register the nullifier as a public input
     builder.register_public_input(_nullifier);
@@ -124,7 +125,7 @@ fn test_wrapped_asset_burn_with_fee_quote() {
     // Create a fee quote
     let fee_quote = SignedQuoteTarget {
         fee_btc: builder.add_virtual_target(),
-        expiry: builder.add_virtual_target(),
+        expiry_timestamp: builder.add_virtual_target(),
         signature: SignatureTarget {
             r_point: PointTarget {
                 x: builder.add_virtual_target(),
@@ -145,7 +146,7 @@ fn test_wrapped_asset_burn_with_fee_quote() {
     };
     
     // Build the circuit
-    let _nullifier = circuit.build::<F, C, D>(&mut builder, sender_sk);
+    let _nullifier = circuit.build::<F, D>(&mut builder, sender_sk);
     
     // Register the nullifier as a public input
     builder.register_public_input(_nullifier);

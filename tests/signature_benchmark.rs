@@ -175,8 +175,11 @@ mod signature_benchmark_tests {
                 message_hashes.push(msg_hash);
             }
             
+            // Prepare message hashes as Vec<Vec<Target>> for batch verification
+            let message_hash_vectors: Vec<Vec<Target>> = message_hashes.iter().map(|&hash| vec![hash]).collect();
+            
             // Verify the batch of signatures
-            batch_verify_signatures(&mut builder, &signatures, &message_hashes, &public_keys);
+            batch_verify_signatures(&mut builder, &message_hash_vectors, &signatures, &public_keys);
             
             // Count the gates added
             let gates = builder.num_gates() - initial_gates;

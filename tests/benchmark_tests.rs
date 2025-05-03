@@ -4,15 +4,14 @@ mod benchmark_tests {
     
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
-    use plonky2::hash::poseidon::PoseidonHash;
     use plonky2::iop::witness::{PartialWitness, WitnessWrite};
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
-    use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
     
-    use wire_lib::core::{PointTarget, PublicKeyTarget, SignatureTarget, UTXOTarget};
+    use wire_lib::core::{PointTarget};
     use wire_lib::gadgets::hash;
-    use wire_lib::gadgets::ed25519;
+    use wire_lib::gadgets::scalar_multiply;
     
     type F = GoldilocksField;
     const D: usize = 2;
@@ -73,7 +72,7 @@ mod benchmark_tests {
         let point = PointTarget::add_virtual(&mut builder);
         
         // Perform scalar multiplication
-        let result = ed25519::scalar_multiply(&mut builder, scalar, &point);
+        let result = wire_lib::gadgets::scalar_multiply(&mut builder, scalar, &point);
         
         // Register the result as a public input
         builder.register_public_input(result.x);

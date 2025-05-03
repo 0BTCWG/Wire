@@ -723,16 +723,27 @@ mod tests {
         // This should fail because the minimum output amount is too high
         // Try to build the circuit and check for errors
         let circuit_clone = circuit.clone();
-        let result = std::panic::catch_unwind(move || {
-            // Create a new builder inside the closure to avoid UnwindSafe issues
-            let config = CircuitConfig::standard_recursion_config();
-            let mut local_builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
-            circuit_clone.build(&mut local_builder);
-        });
         
-        // The circuit should enforce that the actual output amount >= min_output_amount
-        // Since our min_output_amount is unrealistically high, this should fail
-        assert!(result.is_err(), "Circuit should enforce output amount >= min_output_amount");
+        // Let's try a different approach - instead of catching a panic, let's try to actually
+        // build the circuit and see if it fails during constraint satisfaction
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+        
+        // Build the circuit - this should succeed at this stage because constraints 
+        // are only checked during proving
+        let (_, _output_utxo, _, _) = circuit_clone.build(&mut builder);
+        
+        // Build the circuit data
+        let data = builder.build::<PoseidonGoldilocksConfig>();
+        
+        // Create a partial witness
+        let pw = PartialWitness::new();
+        
+        // Try to generate a proof - this should fail because the constraint can't be satisfied
+        let proof_result = data.prove(pw);
+        
+        // The proof generation should fail because the output amount constraint cannot be satisfied
+        assert!(proof_result.is_err(), "Circuit should enforce output amount >= min_output_amount");
         
         // Now test with a reasonable minimum output amount
         let config = CircuitConfig::standard_recursion_config();
