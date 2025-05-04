@@ -1,7 +1,7 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::Path;
-use serde::{Serialize, Deserialize};
 
 use wire_lib::errors::{IOError, ValidationError, WireError, WireResult};
 
@@ -11,15 +11,15 @@ pub struct WireConfig {
     /// Global configuration options
     #[serde(default)]
     pub global: GlobalConfig,
-    
+
     /// Circuit-specific configurations
     #[serde(default)]
     pub circuits: CircuitConfigs,
-    
+
     /// Batch processing configurations
     #[serde(default)]
     pub batch: BatchConfig,
-    
+
     /// Workflow configurations
     #[serde(default)]
     pub workflows: HashMap<String, Workflow>,
@@ -31,15 +31,15 @@ pub struct GlobalConfig {
     /// Default output directory for proofs
     #[serde(default = "default_output_dir")]
     pub output_dir: String,
-    
+
     /// Whether to enable verbose logging
     #[serde(default)]
     pub verbose: bool,
-    
+
     /// Number of threads to use for parallel operations
     #[serde(default = "default_threads")]
     pub threads: usize,
-    
+
     /// Default key file path
     #[serde(default = "default_key_file")]
     pub key_file: String,
@@ -51,23 +51,23 @@ pub struct CircuitConfigs {
     /// Wrapped asset mint circuit configuration
     #[serde(default)]
     pub wrapped_mint: CircuitConfig,
-    
+
     /// Wrapped asset burn circuit configuration
     #[serde(default)]
     pub wrapped_burn: CircuitConfig,
-    
+
     /// Transfer circuit configuration
     #[serde(default)]
     pub transfer: CircuitConfig,
-    
+
     /// Native asset create circuit configuration
     #[serde(default)]
     pub native_create: CircuitConfig,
-    
+
     /// Native asset mint circuit configuration
     #[serde(default)]
     pub native_mint: CircuitConfig,
-    
+
     /// Native asset burn circuit configuration
     #[serde(default)]
     pub native_burn: CircuitConfig,
@@ -79,11 +79,11 @@ pub struct CircuitConfig {
     /// Default input file path template
     #[serde(default = "default_input_template")]
     pub input_template: String,
-    
+
     /// Default output file path template
     #[serde(default = "default_output_template")]
     pub output_template: String,
-    
+
     /// Circuit-specific optimization level
     #[serde(default = "default_optimization_level")]
     pub optimization_level: usize,
@@ -95,15 +95,15 @@ pub struct BatchConfig {
     /// Maximum number of proofs to process in a single batch
     #[serde(default = "default_batch_size")]
     pub batch_size: usize,
-    
+
     /// Whether to use parallel processing for batches
     #[serde(default = "default_parallel")]
     pub parallel: bool,
-    
+
     /// Input directory for batch processing
     #[serde(default = "default_batch_input_dir")]
     pub input_dir: String,
-    
+
     /// Output directory for batch processing
     #[serde(default = "default_batch_output_dir")]
     pub output_dir: String,
@@ -114,7 +114,7 @@ pub struct BatchConfig {
 pub struct Workflow {
     /// Description of the workflow
     pub description: String,
-    
+
     /// Steps in the workflow
     pub steps: Vec<WorkflowStep>,
 }
@@ -124,14 +124,14 @@ pub struct Workflow {
 pub struct WorkflowStep {
     /// Name of the step
     pub name: String,
-    
+
     /// Command to execute
     pub command: String,
-    
+
     /// Arguments for the command
     #[serde(default)]
     pub args: Vec<String>,
-    
+
     /// Whether to continue if this step fails
     #[serde(default)]
     pub continue_on_error: bool,
@@ -193,35 +193,35 @@ impl WireConfig {
     /// Load configuration from a file
     pub fn load<P: AsRef<Path>>(path: P) -> WireResult<Self> {
         let path = path.as_ref();
-        
+
         if !path.exists() {
             return Err(WireError::IOError(IOError::FileSystem(format!(
                 "Configuration file not found: {}",
                 path.display()
             ))));
         }
-        
+
         let content = fs::read_to_string(path).map_err(|e| {
             WireError::IOError(IOError::FileSystem(format!(
                 "Failed to read configuration file: {}",
                 e
             )))
         })?;
-        
+
         let config: WireConfig = serde_json::from_str(&content).map_err(|e| {
             WireError::IOError(IOError::DeserializationError(format!(
                 "Failed to parse configuration file: {}",
                 e
             )))
         })?;
-        
+
         Ok(config)
     }
-    
+
     /// Save configuration to a file
     pub fn save<P: AsRef<Path>>(&self, path: P) -> WireResult<()> {
         let path = path.as_ref();
-        
+
         // Create parent directories if they don't exist
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).map_err(|e| {
@@ -231,40 +231,40 @@ impl WireConfig {
                 )))
             })?;
         }
-        
+
         let content = serde_json::to_string_pretty(self).map_err(|e| {
             WireError::IOError(IOError::SerializationError(format!(
                 "Failed to serialize configuration: {}",
                 e
             )))
         })?;
-        
+
         fs::write(path, content).map_err(|e| {
             WireError::IOError(IOError::FileSystem(format!(
                 "Failed to write configuration file: {}",
                 e
             )))
         })?;
-        
+
         Ok(())
     }
-    
+
     /// Create a default configuration file if it doesn't exist
     pub fn create_default<P: AsRef<Path>>(path: P) -> WireResult<()> {
         let path = path.as_ref();
-        
+
         if path.exists() {
             return Err(WireError::ValidationError(ValidationError::InvalidFormat(
-                format!("Configuration file already exists: {}", path.display())
+                format!("Configuration file already exists: {}", path.display()),
             )));
         }
-        
+
         let config = WireConfig::default();
         config.save(path)?;
-        
+
         Ok(())
     }
-    
+
     /// Get circuit configuration by name
     pub fn get_circuit_config(&self, circuit_type: &str) -> WireResult<&CircuitConfig> {
         match circuit_type {
@@ -274,18 +274,22 @@ impl WireConfig {
             "native_create" => Ok(&self.circuits.native_create),
             "native_mint" => Ok(&self.circuits.native_mint),
             "native_burn" => Ok(&self.circuits.native_burn),
-            _ => Err(WireError::ValidationError(ValidationError::InputValidationError(
-                format!("Unknown circuit type: {}", circuit_type)
-            ))),
+            _ => Err(WireError::ValidationError(
+                ValidationError::InputValidationError(format!(
+                    "Unknown circuit type: {}",
+                    circuit_type
+                )),
+            )),
         }
     }
-    
+
     /// Get workflow by name
     pub fn get_workflow(&self, name: &str) -> WireResult<&Workflow> {
         self.workflows.get(name).ok_or_else(|| {
-            WireError::ValidationError(ValidationError::InputValidationError(
-                format!("Workflow not found: {}", name)
-            ))
+            WireError::ValidationError(ValidationError::InputValidationError(format!(
+                "Workflow not found: {}",
+                name
+            )))
         })
     }
 }
@@ -293,7 +297,7 @@ impl WireConfig {
 /// Example configuration
 pub fn example_config() -> WireConfig {
     let mut config = WireConfig::default();
-    
+
     // Add an example workflow
     let transfer_workflow = Workflow {
         description: "Generate and verify a transfer proof".to_string(),
@@ -322,8 +326,10 @@ pub fn example_config() -> WireConfig {
             },
         ],
     };
-    
-    config.workflows.insert("transfer".to_string(), transfer_workflow);
-    
+
+    config
+        .workflows
+        .insert("transfer".to_string(), transfer_workflow);
+
     config
 }

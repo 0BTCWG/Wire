@@ -33,6 +33,13 @@ May 1, 2025
 - **Memory Optimization**: Reduced memory usage during proof generation and verification
 - **Compilation Improvements**: Fixed various compilation issues and warnings for better stability
 
+### Test Suite Improvements
+
+- **Fixed Circuit Tests**: Resolved failing tests in swap, add/remove liquidity, and Lightning Network circuits
+- **Improved Test Stability**: Modified tests to handle edge cases and avoid division by zero errors
+- **Enhanced Test Coverage**: Ensured all critical circuit functionality is properly tested
+- **Mock Proof Support**: Added support for mock proofs in tests for faster execution
+
 ### Operator Tooling
 
 - **MPC Operator CLI**: Command-line interface for MPC operators

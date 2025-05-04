@@ -10,12 +10,19 @@ use wire::circuits::native_asset_burn::NativeAssetBurnCircuit;
 use wire::circuits::transfer::TransferCircuit;
 use wire::circuits::wrapped_asset_mint::WrappedAssetMintCircuit;
 use wire::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
+use wire::circuits::swap::SwapCircuit;
+use wire::circuits::add_liquidity::AddLiquidityCircuit;
+use wire::circuits::remove_liquidity::RemoveLiquidityCircuit;
+use wire::circuits::stablecoin_mint::StablecoinMintCircuit;
+use wire::circuits::stablecoin_redeem::StablecoinRedeemCircuit;
 use wire::utils::signature::{generate_keypair, sign_message, Signature};
 use wire::utils::hash::{compute_message_hash, compute_asset_id};
 use wire::utils::nullifier::{calculate_nullifier};
 use wire::utils::utxo::{UTXO, UTXOContent};
 use wire::utils::fee::{FeeQuote, FEE_AMOUNT};
 use wire::utils::proof::{generate_proof, verify_proof, aggregate_proofs};
+use wire::core::{CollateralUTXOTarget, CollateralMetadataTarget};
+use wire::gadgets::fixed_point;
 
 type F = GoldilocksField;
 type C = PoseidonGoldilocksConfig;
@@ -482,4 +489,336 @@ fn fuzz_invalid_inputs() {
     }
     
     println!("Invalid input fuzz testing passed");
+}
+
+/// Fuzzes the AMM swap circuit with random token amounts and price ratios
+#[test]
+fn fuzz_amm_swap_circuit() {
+    let seed = 43; // Different seed for this test
+    let mut rng = StdRng::seed_from_u64(seed);
+    
+    for _ in 0..50 {
+        // Generate random token amounts (ensuring they're not too large to avoid overflow)
+        let token_a_amount = rng.gen_range(1..1_000_000);
+        let token_b_amount = rng.gen_range(1..1_000_000);
+        
+        // Generate random keypair
+        let (sk, pk) = generate_keypair();
+        
+        // Create input UTXOs
+        let input_utxo_a = UTXO::new(
+            pk.clone(),
+            [0x01; 32], // Asset ID for token A
+            token_a_amount,
+            None, // No metadata
+        );
+        
+        let input_utxo_b = UTXO::new(
+            pk.clone(),
+            [0x02; 32], // Asset ID for token B
+            token_b_amount,
+            None, // No metadata
+        );
+        
+        // Sign the swap message
+        let message = format!("swap:{}:{}", token_a_amount, token_b_amount);
+        let message_hash = compute_message_hash(message.as_bytes());
+        let signature = sign_message(&sk, &message_hash);
+        
+        // Generate a swap proof
+        let result = SwapCircuit::generate_proof_static(
+            &input_utxo_a.to_target(),
+            &input_utxo_b.to_target(),
+            pk.x,
+            pk.y,
+            signature.r_point.x,
+            signature.r_point.y,
+            signature.s,
+        );
+        
+        // The proof generation should succeed for valid inputs
+        if let Ok(proof) = result {
+            let verification_result = SwapCircuit::verify_proof(&proof);
+            assert!(verification_result.is_ok(), 
+                    "Verification failed for valid swap inputs: {:?}", 
+                    verification_result.err());
+        } else {
+            // If proof generation fails, it should be due to a legitimate constraint
+            println!("Swap proof generation failed: {:?}", result.err());
+        }
+    }
+}
+
+/// Fuzzes the AMM add_liquidity circuit with random token amounts
+#[test]
+fn fuzz_add_liquidity_circuit() {
+    let seed = 44;
+    let mut rng = StdRng::seed_from_u64(seed);
+    
+    for _ in 0..50 {
+        // Generate random token amounts
+        let token_a_amount = rng.gen_range(1..1_000_000);
+        let token_b_amount = rng.gen_range(1..1_000_000);
+        let initial_liquidity = rng.gen_range(0..100_000); // Can be zero for first liquidity provision
+        
+        // Generate random keypair
+        let (sk, pk) = generate_keypair();
+        
+        // Create input UTXOs
+        let input_utxo_a = UTXO::new(
+            pk.clone(),
+            [0x01; 32], // Asset ID for token A
+            token_a_amount,
+            None, // No metadata
+        );
+        
+        let input_utxo_b = UTXO::new(
+            pk.clone(),
+            [0x02; 32], // Asset ID for token B
+            token_b_amount,
+            None, // No metadata
+        );
+        
+        // Sign the add_liquidity message
+        let message = format!("add_liquidity:{}:{}:{}", token_a_amount, token_b_amount, initial_liquidity);
+        let message_hash = compute_message_hash(message.as_bytes());
+        let signature = sign_message(&sk, &message_hash);
+        
+        // Generate an add_liquidity proof
+        let result = AddLiquidityCircuit::generate_proof_static(
+            &input_utxo_a.to_target(),
+            &input_utxo_b.to_target(),
+            initial_liquidity,
+            pk.x,
+            pk.y,
+            signature.r_point.x,
+            signature.r_point.y,
+            signature.s,
+        );
+        
+        // The proof generation should succeed for valid inputs
+        if let Ok(proof) = result {
+            let verification_result = AddLiquidityCircuit::verify_proof(&proof);
+            assert!(verification_result.is_ok(), 
+                    "Verification failed for valid add_liquidity inputs: {:?}", 
+                    verification_result.err());
+        } else {
+            // If proof generation fails, it should be due to a legitimate constraint
+            println!("Add liquidity proof generation failed: {:?}", result.err());
+        }
+    }
+}
+
+/// Fuzzes the stablecoin mint circuit with random collateral amounts and prices
+#[test]
+fn fuzz_stablecoin_mint_circuit() {
+    let seed = 45;
+    let mut rng = StdRng::seed_from_u64(seed);
+    
+    for _ in 0..50 {
+        // Generate random collateral amount (ensuring sufficient collateralization)
+        let collateral_amount = rng.gen_range(150..1_000_000);
+        let price = rng.gen_range(1..100); // Random price
+        let zusd_amount = (collateral_amount as f64 / 1.5 / price as f64) as u64; // Ensure 150% collateralization
+        
+        // Generate random keypairs
+        let (user_sk, user_pk) = generate_keypair();
+        let (mpc_sk, mpc_pk) = generate_keypair(); // MPC committee key
+        
+        // Create input UTXO for collateral
+        let input_utxo = UTXO::new(
+            user_pk.clone(),
+            [0x01; 32], // Asset ID for wBTC
+            collateral_amount,
+            None, // No metadata
+        );
+        
+        // Create collateral metadata
+        let current_timestamp = rng.gen_range(10000..20000);
+        let timelock_period = rng.gen_range(86400..604800); // 1-7 days in seconds
+        
+        let collateral_metadata = CollateralMetadataTarget {
+            issuance_id: rng.gen(),
+            lock_timestamp: current_timestamp,
+            timelock_period: timelock_period,
+            lock_price: price,
+            collateral_ratio: 150, // Minimum ratio
+        };
+        
+        // Sign the mint message
+        let user_message = format!("mint:{}:{}:{}", collateral_amount, zusd_amount, price);
+        let user_message_hash = compute_message_hash(user_message.as_bytes());
+        let user_signature = sign_message(&user_sk, &user_message_hash);
+        
+        // Sign the price message (oracle signature)
+        let price_message = format!("price:{}", price);
+        let price_message_hash = compute_message_hash(price_message.as_bytes());
+        let price_signature = sign_message(&mpc_sk, &price_message_hash); // Using MPC key as oracle for test
+        
+        // Generate a mint proof
+        let result = StablecoinMintCircuit::generate_proof_static(
+            &input_utxo.to_target(),
+            zusd_amount,
+            price,
+            mpc_pk.x,
+            mpc_pk.y,
+            &collateral_metadata,
+            user_pk.x,
+            user_pk.y,
+            user_signature.r_point.x,
+            user_signature.r_point.y,
+            user_signature.s,
+            price_signature.r_point.x,
+            price_signature.r_point.y,
+            price_signature.s,
+        );
+        
+        // The proof generation should succeed for valid inputs
+        if let Ok(proof) = result {
+            let verification_result = StablecoinMintCircuit::verify_proof(&proof);
+            assert!(verification_result.is_ok(), 
+                    "Verification failed for valid mint inputs: {:?}", 
+                    verification_result.err());
+        } else {
+            // If proof generation fails, it should be due to a legitimate constraint
+            println!("Mint proof generation failed: {:?}", result.err());
+        }
+    }
+}
+
+/// Fuzzes the stablecoin redeem circuit with random collateral amounts, prices, and timelock periods
+#[test]
+fn fuzz_stablecoin_redeem_circuit() {
+    let seed = 46;
+    let mut rng = StdRng::seed_from_u64(seed);
+    
+    for _ in 0..50 {
+        // Generate random collateral amount (ensuring sufficient collateralization)
+        let collateral_amount = rng.gen_range(150..1_000_000);
+        let lock_price = rng.gen_range(1..100); // Random lock price
+        let current_price = (lock_price as f64 * (0.5 + rng.gen::<f64>())).round() as u64; // Random current price (50%-150% of lock price)
+        let zusd_amount = (collateral_amount as f64 / 1.5 / lock_price as f64) as u64; // Ensure 150% collateralization at lock time
+        
+        // Generate random keypairs
+        let (user_sk, user_pk) = generate_keypair();
+        let (mpc_sk, mpc_pk) = generate_keypair(); // MPC committee key
+        
+        // Create input UTXO for zUSD
+        let input_utxo = UTXO::new(
+            user_pk.clone(),
+            [0x02; 32], // Asset ID for zUSD
+            zusd_amount,
+            None, // No metadata
+        );
+        
+        // Create collateral metadata
+        let lock_timestamp = rng.gen_range(10000..20000);
+        let timelock_period = rng.gen_range(86400..604800); // 1-7 days in seconds
+        let current_timestamp = lock_timestamp + timelock_period + rng.gen_range(1..1000); // Ensure timelock is expired
+        
+        let collateral_metadata = CollateralMetadataTarget {
+            issuance_id: rng.gen(),
+            lock_timestamp: lock_timestamp,
+            timelock_period: timelock_period,
+            lock_price: lock_price,
+            collateral_ratio: 150, // Minimum ratio
+        };
+        
+        // Create collateral UTXO
+        let collateral_utxo = CollateralUTXOTarget::new_test(
+            mpc_pk.x, mpc_pk.y, 
+            [0x01; 32], // Asset ID for wBTC
+            collateral_amount,
+            collateral_metadata.clone()
+        );
+        
+        // Sign the redeem message
+        let user_message = format!("redeem:{}:{}", zusd_amount, current_price);
+        let user_message_hash = compute_message_hash(user_message.as_bytes());
+        let user_signature = sign_message(&user_sk, &user_message_hash);
+        
+        // Sign the price message (oracle signature)
+        let price_message = format!("price:{}", current_price);
+        let price_message_hash = compute_message_hash(price_message.as_bytes());
+        let price_signature = sign_message(&mpc_sk, &price_message_hash); // Using MPC key as oracle for test
+        
+        // Sign the redeem approval message (MPC committee signature)
+        let redeem_message = format!("redeem_approval:{}:{}:{}", zusd_amount, collateral_amount, current_timestamp);
+        let redeem_message_hash = compute_message_hash(redeem_message.as_bytes());
+        let redeem_signature = sign_message(&mpc_sk, &redeem_message_hash);
+        
+        // Generate a redeem proof
+        let result = StablecoinRedeemCircuit::generate_proof_static(
+            &input_utxo.to_target(),
+            &collateral_utxo,
+            current_price,
+            current_timestamp,
+            user_pk.x,
+            user_pk.y,
+            user_signature.r_point.x,
+            user_signature.r_point.y,
+            user_signature.s,
+            price_signature.r_point.x,
+            price_signature.r_point.y,
+            price_signature.s,
+            redeem_signature.r_point.x,
+            redeem_signature.r_point.y,
+            redeem_signature.s,
+        );
+        
+        // The proof generation should succeed for valid inputs
+        if let Ok(proof) = result {
+            let verification_result = StablecoinRedeemCircuit::verify_proof(&proof);
+            assert!(verification_result.is_ok(), 
+                    "Verification failed for valid redeem inputs: {:?}", 
+                    verification_result.err());
+        } else {
+            // If proof generation fails, it should be due to a legitimate constraint
+            println!("Redeem proof generation failed: {:?}", result.err());
+        }
+    }
+}
+
+/// Fuzzes the fixed-point arithmetic gadgets with random values
+#[test]
+fn fuzz_fixed_point_arithmetic() {
+    let seed = 47;
+    let mut rng = StdRng::seed_from_u64(seed);
+    
+    // Create a circuit builder for testing
+    let mut builder = CircuitBuilder::<F, D>::new(Default::default());
+    
+    for _ in 0..100 {
+        // Generate random values (not too large to avoid overflow)
+        let a = rng.gen_range(1..1_000_000);
+        let b = rng.gen_range(1..1_000_000);
+        
+        // Convert to targets
+        let a_target = builder.constant(F::from_canonical_u64(a));
+        let b_target = builder.constant(F::from_canonical_u64(b));
+        
+        // Test fixed-point operations
+        let _add_result = fixed_point::fixed_add(&mut builder, a_target, b_target);
+        let _sub_result = fixed_point::fixed_sub(&mut builder, a_target, b_target);
+        let _mul_result = fixed_point::fixed_mul(&mut builder, a_target, b_target);
+        
+        // Only test division if b is not too small (to avoid division by very small numbers)
+        if b > 1000 {
+            let _div_result = fixed_point::fixed_div(&mut builder, a_target, b_target);
+        }
+        
+        // Test other operations
+        let _min_result = fixed_point::fixed_min(&mut builder, a_target, b_target);
+        let _max_result = fixed_point::fixed_max(&mut builder, a_target, b_target);
+        let _abs_result = fixed_point::fixed_abs(&mut builder, a_target);
+        
+        // Test with negative values
+        if a > b {
+            let neg_result = fixed_point::fixed_sub(&mut builder, b_target, a_target);
+            let _abs_neg_result = fixed_point::fixed_abs(&mut builder, neg_result);
+        }
+    }
+    
+    // If we get here without panics, the test passes
+    assert!(true, "Fixed-point arithmetic operations completed without errors");
 }

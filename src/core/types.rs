@@ -10,13 +10,13 @@ use serde::{Deserialize, Serialize};
 pub struct UTXO {
     /// The public key hash of the owner
     pub owner_pubkey_hash: Vec<u8>,
-    
+
     /// The asset ID (0 for wBTC)
     pub asset_id: Vec<u8>,
-    
+
     /// The amount of the asset
     pub amount: u64,
-    
+
     /// A random salt for privacy
     pub salt: Vec<u8>,
 }
@@ -26,13 +26,13 @@ pub struct UTXO {
 pub struct UTXOTarget {
     /// The public key hash of the owner
     pub owner_pubkey_hash_target: Vec<Target>,
-    
+
     /// The asset ID (0 for wBTC)
     pub asset_id_target: Vec<Target>,
-    
+
     /// The amount of the asset
     pub amount_target: Target,
-    
+
     /// A random salt for privacy
     pub salt_target: Vec<Target>,
 }
@@ -46,17 +46,17 @@ impl UTXOTarget {
         let owner_pubkey_hash_target = (0..hash_size)
             .map(|_| builder.add_virtual_target())
             .collect();
-            
+
         let asset_id_target = (0..hash_size)
             .map(|_| builder.add_virtual_target())
             .collect();
-            
+
         let amount_target = builder.add_virtual_target();
-        
+
         let salt_target = (0..hash_size)
             .map(|_| builder.add_virtual_target())
             .collect();
-            
+
         Self {
             owner_pubkey_hash_target,
             asset_id_target,
@@ -64,23 +64,31 @@ impl UTXOTarget {
             salt_target,
         }
     }
-    
+
     /// Connect this UTXOTarget to another one
     pub fn connect<F: RichField + Extendable<D>, const D: usize>(
         &self,
         builder: &mut CircuitBuilder<F, D>,
         other: &Self,
     ) {
-        for (a, b) in self.owner_pubkey_hash_target.iter().zip(other.owner_pubkey_hash_target.iter()) {
+        for (a, b) in self
+            .owner_pubkey_hash_target
+            .iter()
+            .zip(other.owner_pubkey_hash_target.iter())
+        {
             builder.connect(*a, *b);
         }
-        
-        for (a, b) in self.asset_id_target.iter().zip(other.asset_id_target.iter()) {
+
+        for (a, b) in self
+            .asset_id_target
+            .iter()
+            .zip(other.asset_id_target.iter())
+        {
             builder.connect(*a, *b);
         }
-        
+
         builder.connect(self.amount_target, other.amount_target);
-        
+
         for (a, b) in self.salt_target.iter().zip(other.salt_target.iter()) {
             builder.connect(*a, *b);
         }
@@ -101,7 +109,7 @@ impl PointTarget {
     ) -> Self {
         let x = builder.add_virtual_target();
         let y = builder.add_virtual_target();
-        
+
         Self { x, y }
     }
 }
@@ -118,7 +126,7 @@ impl PublicKeyTarget {
         builder: &mut CircuitBuilder<F, D>,
     ) -> Self {
         let point = PointTarget::add_virtual(builder);
-        
+
         Self { point }
     }
 }
@@ -137,7 +145,7 @@ impl SignatureTarget {
     ) -> Self {
         let r_point = PointTarget::add_virtual(builder);
         let s_scalar = builder.add_virtual_target();
-        
+
         Self { r_point, s_scalar }
     }
 }

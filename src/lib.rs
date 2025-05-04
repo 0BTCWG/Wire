@@ -8,8 +8,8 @@ pub mod circuits;
 pub mod core;
 pub mod errors;
 pub mod gadgets;
-pub mod utils;
 pub mod mpc;
+pub mod utils;
 
 #[cfg(feature = "wasm")]
 pub mod wasm;
@@ -18,14 +18,7 @@ pub mod wasm;
 pub use errors::{WireError, WireResult};
 
 // Re-export MPC functionality
-pub use mpc::{
-    MPCCore,
-    MPCConfig,
-    MPCError,
-    MPCResult,
-    init as init_mpc,
-    run_cli as run_mpc_cli,
-};
+pub use mpc::{init as init_mpc, run_cli as run_mpc_cli, MPCConfig, MPCCore, MPCError, MPCResult};
 
 // Re-export CLI modules
 // pub use cli::{
@@ -47,7 +40,10 @@ use log::info;
 
 /// Initialize the library with default configuration
 pub fn init() {
-    info!("Initializing 0BTC Wire library v{}", env!("CARGO_PKG_VERSION"));
+    info!(
+        "Initializing 0BTC Wire library v{}",
+        env!("CARGO_PKG_VERSION")
+    );
 }
 
 #[cfg(test)]

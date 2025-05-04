@@ -1,13 +1,23 @@
 // Validation module for the WASM interface
 // Provides security-focused input validation for all WASM functions
 
-#[cfg(feature = "wasm")]
-use wasm_bindgen::prelude::*;
+use crate::errors::{ValidationError as WireValidationError, WireError};
 #[cfg(feature = "wasm")]
 use js_sys::{Array, Object, Uint8Array};
+use log::warn;
 use serde_json::Value;
 use std::collections::HashSet;
-use log::warn;
+#[cfg(feature = "wasm")]
+use wasm_bindgen::prelude::*;
+
+/// Maximum allowed input string length (1MB)
+const MAX_STRING_LENGTH: usize = 1024 * 1024;
+
+/// Maximum allowed array length
+const MAX_ARRAY_LENGTH: usize = 1024;
+
+/// Maximum allowed batch size
+const MAX_BATCH_SIZE: usize = 16;
 
 /// Error type for validation failures
 #[derive(Debug)]
@@ -18,6 +28,7 @@ pub enum ValidationError {
     InvalidLength(String),
     InvalidFormat(String),
     SecurityViolation(String),
+    InputValidationError(String),
 }
 
 impl ValidationError {
@@ -30,32 +41,124 @@ impl ValidationError {
             ValidationError::InvalidLength(field) => format!("Invalid length for field: {}", field),
             ValidationError::InvalidFormat(field) => format!("Invalid format for field: {}", field),
             ValidationError::SecurityViolation(msg) => format!("Security violation: {}", msg),
+            ValidationError::InputValidationError(msg) => {
+                format!("Input validation error: {}", msg)
+            }
         };
         JsValue::from_str(&error_msg)
     }
 }
 
+impl From<ValidationError> for WireError {
+    fn from(error: ValidationError) -> Self {
+        match error {
+            ValidationError::MissingField(field) => {
+                WireError::ValidationError(WireValidationError::MissingField(field))
+            }
+            ValidationError::InvalidType(field) => {
+                WireError::ValidationError(WireValidationError::InvalidType(field))
+            }
+            ValidationError::InvalidValue(field) => {
+                WireError::ValidationError(WireValidationError::InvalidValue(field))
+            }
+            ValidationError::InvalidLength(field) => {
+                WireError::ValidationError(WireValidationError::InvalidLength(field))
+            }
+            ValidationError::InvalidFormat(field) => {
+                WireError::ValidationError(WireValidationError::InvalidFormat(field))
+            }
+            ValidationError::SecurityViolation(msg) => {
+                WireError::ValidationError(WireValidationError::SecurityViolation(msg))
+            }
+            ValidationError::InputValidationError(msg) => {
+                WireError::ValidationError(WireValidationError::InputValidationError(msg))
+            }
+        }
+    }
+}
+
+/// Validate a string length
+pub fn validate_string_length(
+    value: &str,
+    field_name: &str,
+    min_length: usize,
+    max_length: Option<usize>,
+) -> Result<(), ValidationError> {
+    let max = max_length.unwrap_or(MAX_STRING_LENGTH);
+
+    if value.len() < min_length {
+        return Err(ValidationError::InvalidLength(format!(
+            "{} must be at least {} characters",
+            field_name, min_length
+        )));
+    }
+
+    if value.len() > max {
+        return Err(ValidationError::InvalidLength(format!(
+            "{} must be at most {} characters",
+            field_name, max
+        )));
+    }
+
+    // Check for control characters
+    if value
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err(ValidationError::SecurityViolation(format!(
+            "{} contains invalid control characters",
+            field_name
+        )));
+    }
+
+    Ok(())
+}
+
 /// Validate a hex string (with or without 0x prefix)
-pub fn validate_hex_string(value: &str, field_name: &str, expected_length: Option<usize>) -> Result<Vec<u8>, ValidationError> {
+pub fn validate_hex_string(
+    value: &str,
+    field_name: &str,
+    expected_length: Option<usize>,
+) -> Result<Vec<u8>, ValidationError> {
+    // Validate string length
+    validate_string_length(
+        value,
+        field_name,
+        2,
+        Some(2 + (expected_length.unwrap_or(MAX_STRING_LENGTH / 2) * 2)),
+    )?;
+
     // Remove 0x prefix if present
     let hex_str = value.trim_start_matches("0x");
-    
+
     // Check if the string is valid hex
     if !hex_str.chars().all(|c| c.is_digit(16)) {
         return Err(ValidationError::InvalidFormat(format!(
-            "{} must be a valid hex string", field_name
+            "{} must be a valid hex string",
+            field_name
         )));
     }
-    
+
+    // Check if the length is even (required for hex decoding)
+    if hex_str.len() % 2 != 0 {
+        return Err(ValidationError::InvalidFormat(format!(
+            "{} must have an even number of hex characters",
+            field_name
+        )));
+    }
+
     // Check length if specified
     if let Some(expected) = expected_length {
         if hex_str.len() != expected * 2 {
             return Err(ValidationError::InvalidLength(format!(
-                "{} must be {} bytes ({} hex characters)", field_name, expected, expected * 2
+                "{} must be {} bytes ({} hex characters)",
+                field_name,
+                expected,
+                expected * 2
             )));
         }
     }
-    
+
     // Decode the hex string
     hex::decode(hex_str).map_err(|_| {
         ValidationError::InvalidFormat(format!("{} could not be decoded as hex", field_name))
@@ -94,6 +197,9 @@ pub fn validate_asset_id(value: &str, field_name: &str) -> Result<Vec<u8>, Valid
 
 /// Validate a circuit type
 pub fn validate_circuit_type(circuit_type: &str) -> Result<String, ValidationError> {
+    // Validate string length
+    validate_string_length(circuit_type, "circuit_type", 1, Some(50))?;
+
     let valid_circuit_types = [
         "wrapped_asset_mint",
         "wrapped_asset_burn",
@@ -101,8 +207,11 @@ pub fn validate_circuit_type(circuit_type: &str) -> Result<String, ValidationErr
         "native_asset_create",
         "native_asset_mint",
         "native_asset_burn",
+        "add_liquidity",
+        "remove_liquidity",
+        "swap",
     ];
-    
+
     if valid_circuit_types.contains(&circuit_type) {
         Ok(circuit_type.to_string())
     } else {
@@ -118,15 +227,44 @@ pub fn validate_circuit_type(circuit_type: &str) -> Result<String, ValidationErr
 pub fn validate_batch_size(batch_size: usize) -> Result<usize, ValidationError> {
     if batch_size == 0 {
         return Err(ValidationError::InvalidValue(
-            "Batch size must be greater than 0".to_string()
+            "Batch size must be greater than 0".to_string(),
         ));
     }
-    
-    if batch_size > 16 {
-        warn!("Large batch size ({}), this may cause performance issues", batch_size);
+
+    if batch_size > MAX_BATCH_SIZE {
+        return Err(ValidationError::InvalidValue(format!(
+            "Batch size must be at most {}",
+            MAX_BATCH_SIZE
+        )));
     }
-    
+
     Ok(batch_size)
+}
+
+/// Validate an array length
+pub fn validate_array_length<T>(
+    array: &[T],
+    field_name: &str,
+    min_length: usize,
+    max_length: Option<usize>,
+) -> Result<(), ValidationError> {
+    let max = max_length.unwrap_or(MAX_ARRAY_LENGTH);
+
+    if array.len() < min_length {
+        return Err(ValidationError::InvalidLength(format!(
+            "{} must have at least {} elements",
+            field_name, min_length
+        )));
+    }
+
+    if array.len() > max {
+        return Err(ValidationError::InvalidLength(format!(
+            "{} must have at most {} elements",
+            field_name, max
+        )));
+    }
+
+    Ok(())
 }
 
 /// Validate a u64 value
@@ -137,33 +275,67 @@ pub fn validate_u64(value: &Value, field_name: &str) -> Result<u64, ValidationEr
                 Ok(num)
             } else {
                 Err(ValidationError::InvalidValue(format!(
-                    "{} must be a non-negative integer", field_name
+                    "{} must be a non-negative integer",
+                    field_name
                 )))
             }
-        },
+        }
         Value::String(s) => {
+            // Validate string length
+            validate_string_length(s, field_name, 1, Some(64))?;
+
             // Try to parse the string as a u64
             if s.starts_with("0x") {
                 // Parse as hex
                 let hex_str = s.trim_start_matches("0x");
                 u64::from_str_radix(hex_str, 16).map_err(|_| {
                     ValidationError::InvalidValue(format!(
-                        "{} must be a valid hex number", field_name
+                        "{} must be a valid hex number",
+                        field_name
                     ))
                 })
             } else {
                 // Parse as decimal
                 s.parse::<u64>().map_err(|_| {
-                    ValidationError::InvalidValue(format!(
-                        "{} must be a valid number", field_name
-                    ))
+                    ValidationError::InvalidValue(format!("{} must be a valid number", field_name))
                 })
             }
-        },
+        }
         _ => Err(ValidationError::InvalidType(format!(
-            "{} must be a number or string", field_name
+            "{} must be a number or string",
+            field_name
         ))),
     }
+}
+
+/// Validate a u64 value with range check
+pub fn validate_u64_range(
+    value: &Value,
+    field_name: &str,
+    min: Option<u64>,
+    max: Option<u64>,
+) -> Result<u64, ValidationError> {
+    let num = validate_u64(value, field_name)?;
+
+    if let Some(min_val) = min {
+        if num < min_val {
+            return Err(ValidationError::InvalidValue(format!(
+                "{} must be at least {}",
+                field_name, min_val
+            )));
+        }
+    }
+
+    if let Some(max_val) = max {
+        if num > max_val {
+            return Err(ValidationError::InvalidValue(format!(
+                "{} must be at most {}",
+                field_name, max_val
+            )));
+        }
+    }
+
+    Ok(num)
 }
 
 /// Validate a boolean value
@@ -171,546 +343,192 @@ pub fn validate_bool(value: &Value, field_name: &str) -> Result<bool, Validation
     match value {
         Value::Bool(b) => Ok(*b),
         Value::String(s) => {
+            // Validate string length
+            validate_string_length(s, field_name, 1, Some(5))?;
+
             match s.to_lowercase().as_str() {
                 "true" => Ok(true),
                 "false" => Ok(false),
                 _ => Err(ValidationError::InvalidValue(format!(
-                    "{} must be a boolean value", field_name
+                    "{} must be a boolean value",
+                    field_name
                 ))),
             }
-        },
+        }
         Value::Number(n) => {
             if let Some(num) = n.as_u64() {
                 match num {
                     0 => Ok(false),
                     1 => Ok(true),
                     _ => Err(ValidationError::InvalidValue(format!(
-                        "{} must be 0 or 1 if provided as a number", field_name
+                        "{} must be 0 or 1 if provided as a number",
+                        field_name
                     ))),
                 }
             } else {
                 Err(ValidationError::InvalidValue(format!(
-                    "{} must be 0 or 1 if provided as a number", field_name
+                    "{} must be 0 or 1 if provided as a number",
+                    field_name
                 )))
             }
-        },
+        }
         _ => Err(ValidationError::InvalidType(format!(
-            "{} must be a boolean, number (0/1), or string (true/false)", field_name
+            "{} must be a boolean, number (0/1), or string (true/false)",
+            field_name
         ))),
     }
 }
 
-/// Validate a string value
-pub fn validate_string(value: &Value, field_name: &str) -> Result<String, ValidationError> {
-    match value {
-        Value::String(s) => Ok(s.clone()),
-        _ => Err(ValidationError::InvalidType(format!(
-            "{} must be a string", field_name
-        ))),
+/// Validate a JSON object has required fields
+pub fn validate_required_fields(
+    obj: &Value,
+    required_fields: &[&str],
+    context: &str,
+) -> Result<(), ValidationError> {
+    if !obj.is_object() {
+        return Err(ValidationError::InvalidType(format!(
+            "{} must be a JSON object",
+            context
+        )));
     }
-}
 
-/// Validate an array value
-pub fn validate_array<'a>(value: &'a Value, field_name: &str) -> Result<&'a Vec<Value>, ValidationError> {
-    match value {
-        Value::Array(a) => Ok(a),
-        _ => Err(ValidationError::InvalidType(format!(
-            "{} must be an array", field_name
-        ))),
-    }
-}
+    let obj = obj.as_object().unwrap();
 
-/// Validate an object value
-pub fn validate_object<'a>(value: &'a Value, field_name: &str) -> Result<&'a serde_json::Map<String, Value>, ValidationError> {
-    match value {
-        Value::Object(o) => Ok(o),
-        _ => Err(ValidationError::InvalidType(format!(
-            "{} must be an object", field_name
-        ))),
+    for &field in required_fields {
+        if !obj.contains_key(field) {
+            return Err(ValidationError::MissingField(format!(
+                "{} is missing required field: {}",
+                context, field
+            )));
+        }
     }
-}
 
-/// Validate a proof structure
-pub fn validate_proof_structure(proof: &Value) -> Result<(), ValidationError> {
-    // Check that the proof is an object
-    let proof_obj = validate_object(proof, "proof")?;
-    
-    // Check for required fields
-    if !proof_obj.contains_key("proof") {
-        return Err(ValidationError::MissingField("proof".to_string()));
-    }
-    
-    if !proof_obj.contains_key("public_inputs") {
-        return Err(ValidationError::MissingField("public_inputs".to_string()));
-    }
-    
-    // Validate the proof field
-    let proof_field = &proof_obj["proof"];
-    validate_object(proof_field, "proof.proof")?;
-    
-    // Validate the public_inputs field
-    let public_inputs = &proof_obj["public_inputs"];
-    validate_array(public_inputs, "proof.public_inputs")?;
-    
     Ok(())
 }
 
-#[cfg(feature = "wasm")]
-/// Validate a JS array of proofs
-pub fn validate_proofs_array(proofs_array: &JsValue) -> Result<Vec<Value>, ValidationError> {
-    // Convert JS array to Rust array
-    if !js_sys::Array::is_array(proofs_array) {
-        return Err(ValidationError::InvalidType(
-            "proofs must be an array".to_string()
-        ));
+/// Validate a field is of a specific JSON type
+pub fn validate_field_type(
+    obj: &Value,
+    field: &str,
+    expected_type: &str,
+    context: &str,
+) -> Result<(), ValidationError> {
+    if !obj.is_object() {
+        return Err(ValidationError::InvalidType(format!(
+            "{} must be a JSON object",
+            context
+        )));
     }
-    
-    let array = Array::from(proofs_array);
-    let length = array.length() as usize;
-    
-    if length == 0 {
-        return Err(ValidationError::InvalidValue(
-            "proofs array must not be empty".to_string()
-        ));
-    }
-    
-    let mut proofs = Vec::with_capacity(length);
-    
-    for i in 0..length {
-        let proof_js = array.get(i);
-        let proof: Value = serde_wasm_bindgen::from_value(proof_js).map_err(|_| {
-            ValidationError::InvalidValue(format!(
-                "proof at index {} is not a valid JSON object", i
-            ))
-        })?;
-        
-        // Validate the proof structure
-        validate_proof_structure(&proof)?;
-        
-        proofs.push(proof);
-    }
-    
-    Ok(proofs)
-}
 
-#[cfg(feature = "wasm")]
-/// Validate options for proof aggregation
-pub fn validate_aggregation_options(options_js: &JsValue) -> Result<(usize, bool), ValidationError> {
-    // Default values
-    let mut batch_size = 4;
-    let mut verbose = false;
-    
-    // If options are provided, validate them
-    if !options_js.is_undefined() && !options_js.is_null() {
-        let options: Value = serde_wasm_bindgen::from_value(options_js.clone()).map_err(|_| {
-            ValidationError::InvalidValue("options is not a valid JSON object".to_string())
-        })?;
-        
-        let options_obj = validate_object(&options, "options")?;
-        
-        // Validate batch_size if provided
-        if let Some(bs) = options_obj.get("batch_size") {
-            batch_size = validate_u64(bs, "options.batch_size")? as usize;
-            validate_batch_size(batch_size)?;
-        }
-        
-        // Validate verbose if provided
-        if let Some(v) = options_obj.get("verbose") {
-            verbose = validate_bool(v, "options.verbose")?;
-        }
-    }
-    
-    Ok((batch_size, verbose))
-}
+    let obj = obj.as_object().unwrap();
 
-/// Extract and validate a required field from a JSON object
-pub fn extract_required_field<T>(
-    params: &Value,
-    field_name: &str,
-    validator: impl FnOnce(&Value, &str) -> Result<T, ValidationError>
-) -> Result<T, ValidationError> {
-    let params_obj = validate_object(params, "params")?;
-    
-    match params_obj.get(field_name) {
-        Some(value) => validator(value, field_name),
-        None => Err(ValidationError::MissingField(field_name.to_string())),
+    if !obj.contains_key(field) {
+        return Err(ValidationError::MissingField(format!(
+            "{} is missing field: {}",
+            context, field
+        )));
     }
-}
 
-/// Extract and validate an optional field from a JSON object
-pub fn extract_optional_field<T>(
-    params: &Value,
-    field_name: &str,
-    validator: impl FnOnce(&Value, &str) -> Result<T, ValidationError>
-) -> Result<Option<T>, ValidationError> {
-    let params_obj = validate_object(params, "params")?;
-    
-    match params_obj.get(field_name) {
-        Some(value) => {
-            if value.is_null() {
-                Ok(None)
-            } else {
-                Ok(Some(validator(value, field_name)?))
-            }
-        },
-        None => Ok(None),
+    let value = &obj[field];
+
+    let type_valid = match expected_type {
+        "string" => value.is_string(),
+        "number" => value.is_number(),
+        "boolean" => value.is_boolean(),
+        "array" => value.is_array(),
+        "object" => value.is_object(),
+        "null" => value.is_null(),
+        _ => false,
+    };
+
+    if !type_valid {
+        return Err(ValidationError::InvalidType(format!(
+            "{}: field {} must be of type {}",
+            context, field, expected_type
+        )));
     }
-}
 
-/// Validate parameters for wrapped asset mint
-pub fn validate_wrapped_asset_mint_params(params: &Value) -> Result<(), ValidationError> {
-    // Required fields
-    extract_required_field(params, "recipientPkHash", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_hash(&hex, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "amount", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "depositNonce", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "custodianPkX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "custodianPkY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureS", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "salt", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_salt(&hex, f)?;
-        Ok(())
-    })?;
-    
     Ok(())
 }
 
-/// Validate parameters for wrapped asset burn
-pub fn validate_wrapped_asset_burn_params(params: &Value) -> Result<(), ValidationError> {
-    // Required fields
-    extract_required_field(params, "inputUtxoOwnerPubkeyHash", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_hash(&hex, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "inputUtxoAssetId", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_asset_id(&hex, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "inputUtxoAmount", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "inputUtxoSalt", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_salt(&hex, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "senderSk", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "senderPkX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "senderPkY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureS", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "destinationBtcAddress", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_hex_string(&hex, f, None)?;
-        Ok(())
-    })?;
-    
-    // Optional fields
-    extract_optional_field(params, "feeBtc", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "feeExpiry", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "feeSignatureRX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "feeSignatureRY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "feeSignatureS", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "custodianPkX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_optional_field(params, "custodianPkY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    Ok(())
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
 
-/// Validate parameters for transfer
-pub fn validate_transfer_params(params: &Value) -> Result<(), ValidationError> {
-    // Validate input UTXOs
-    extract_required_field(params, "inputUtxos", |v, f| {
-        let utxos = validate_array(v, f)?;
-        
-        if utxos.is_empty() {
-            return Err(ValidationError::InvalidValue(
-                "inputUtxos must not be empty".to_string()
-            ));
-        }
-        
-        for (i, utxo) in utxos.iter().enumerate() {
-            let utxo_obj = validate_object(utxo, &format!("{}[{}]", f, i))?;
-            
-            // Validate required UTXO fields
-            if !utxo_obj.contains_key("ownerPubkeyHash") {
-                return Err(ValidationError::MissingField(
-                    format!("{}[{}].ownerPubkeyHash", f, i)
-                ));
-            }
-            
-            if !utxo_obj.contains_key("assetId") {
-                return Err(ValidationError::MissingField(
-                    format!("{}[{}].assetId", f, i)
-                ));
-            }
-            
-            if !utxo_obj.contains_key("amount") {
-                return Err(ValidationError::MissingField(
-                    format!("{}[{}].amount", f, i)
-                ));
-            }
-            
-            if !utxo_obj.contains_key("salt") {
-                return Err(ValidationError::MissingField(
-                    format!("{}[{}].salt", f, i)
-                ));
-            }
-            
-            // Validate UTXO field types and values
-            let owner_pk_hash = &utxo_obj["ownerPubkeyHash"];
-            let owner_pk_hash_str = validate_string(owner_pk_hash, &format!("{}[{}].ownerPubkeyHash", f, i))?;
-            validate_hash(&owner_pk_hash_str, &format!("{}[{}].ownerPubkeyHash", f, i))?;
-            
-            let asset_id = &utxo_obj["assetId"];
-            let asset_id_str = validate_string(asset_id, &format!("{}[{}].assetId", f, i))?;
-            validate_asset_id(&asset_id_str, &format!("{}[{}].assetId", f, i))?;
-            
-            let amount = &utxo_obj["amount"];
-            validate_u64(amount, &format!("{}[{}].amount", f, i))?;
-            
-            let salt = &utxo_obj["salt"];
-            let salt_str = validate_string(salt, &format!("{}[{}].salt", f, i))?;
-            validate_salt(&salt_str, &format!("{}[{}].salt", f, i))?;
-        }
-        
-        Ok(())
-    })?;
-    
-    // Validate recipient public key hashes
-    extract_required_field(params, "recipientPkHashes", |v, f| {
-        let pk_hashes = validate_array(v, f)?;
-        
-        if pk_hashes.is_empty() {
-            return Err(ValidationError::InvalidValue(
-                "recipientPkHashes must not be empty".to_string()
-            ));
-        }
-        
-        for (i, pk_hash) in pk_hashes.iter().enumerate() {
-            let pk_hash_str = validate_string(pk_hash, &format!("{}[{}]", f, i))?;
-            validate_hash(&pk_hash_str, &format!("{}[{}]", f, i))?;
-        }
-        
-        Ok(())
-    })?;
-    
-    // Validate output amounts
-    extract_required_field(params, "outputAmounts", |v, f| {
-        let amounts = validate_array(v, f)?;
-        
-        if amounts.is_empty() {
-            return Err(ValidationError::InvalidValue(
-                "outputAmounts must not be empty".to_string()
-            ));
-        }
-        
-        for (i, amount) in amounts.iter().enumerate() {
-            validate_u64(amount, &format!("{}[{}]", f, i))?;
-        }
-        
-        Ok(())
-    })?;
-    
-    // Validate that recipientPkHashes and outputAmounts have the same length
-    let recipient_pk_hashes = validate_array(&params["recipientPkHashes"], "recipientPkHashes")?;
-    let output_amounts = validate_array(&params["outputAmounts"], "outputAmounts")?;
-    
-    if recipient_pk_hashes.len() != output_amounts.len() {
-        return Err(ValidationError::InvalidValue(
-            "recipientPkHashes and outputAmounts must have the same length".to_string()
-        ));
+    #[test]
+    fn test_validate_hex_string() {
+        // Valid hex strings
+        assert!(validate_hex_string("0x1234", "test", None).is_ok());
+        assert!(validate_hex_string("1234", "test", None).is_ok());
+        assert!(validate_hex_string("0xabcdef", "test", None).is_ok());
+        assert!(validate_hex_string("ABCDEF", "test", None).is_ok());
+
+        // Invalid hex strings
+        assert!(validate_hex_string("0x123", "test", None).is_err()); // Odd length
+        assert!(validate_hex_string("123g", "test", None).is_err()); // Invalid character
+        assert!(validate_hex_string("", "test", None).is_err()); // Empty string
+
+        // Length validation
+        assert!(validate_hex_string("1234", "test", Some(2)).is_ok());
+        assert!(validate_hex_string("123456", "test", Some(2)).is_err());
     }
-    
-    // Validate sender keys and signature
-    extract_required_field(params, "senderSk", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "senderPkX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "senderPkY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRX", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureRY", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "signatureS", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    // Validate fee input UTXO
-    extract_required_field(params, "feeInputUtxo", |v, f| {
-        let fee_utxo = validate_object(v, f)?;
-        
-        // Validate required fee UTXO fields
-        if !fee_utxo.contains_key("ownerPubkeyHash") {
-            return Err(ValidationError::MissingField(
-                format!("{}.ownerPubkeyHash", f)
-            ));
-        }
-        
-        if !fee_utxo.contains_key("assetId") {
-            return Err(ValidationError::MissingField(
-                format!("{}.assetId", f)
-            ));
-        }
-        
-        if !fee_utxo.contains_key("amount") {
-            return Err(ValidationError::MissingField(
-                format!("{}.amount", f)
-            ));
-        }
-        
-        if !fee_utxo.contains_key("salt") {
-            return Err(ValidationError::MissingField(
-                format!("{}.salt", f)
-            ));
-        }
-        
-        // Validate fee UTXO field types and values
-        let owner_pk_hash = &fee_utxo["ownerPubkeyHash"];
-        let owner_pk_hash_str = validate_string(owner_pk_hash, &format!("{}.ownerPubkeyHash", f))?;
-        validate_hash(&owner_pk_hash_str, &format!("{}.ownerPubkeyHash", f))?;
-        
-        let asset_id = &fee_utxo["assetId"];
-        let asset_id_str = validate_string(asset_id, &format!("{}.assetId", f))?;
-        validate_asset_id(&asset_id_str, &format!("{}.assetId", f))?;
-        
-        let amount = &fee_utxo["amount"];
-        validate_u64(amount, &format!("{}.amount", f))?;
-        
-        let salt = &fee_utxo["salt"];
-        let salt_str = validate_string(salt, &format!("{}.salt", f))?;
-        validate_salt(&salt_str, &format!("{}.salt", f))?;
-        
-        Ok(())
-    })?;
-    
-    // Validate fee amount and reservoir address
-    extract_required_field(params, "feeAmount", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "feeReservoirAddressHash", |v, f| {
-        let hex = validate_string(v, f)?;
-        validate_hash(&hex, f)?;
-        Ok(())
-    })?;
-    
-    extract_required_field(params, "nonce", |v, f| {
-        validate_u64(v, f)?;
-        Ok(())
-    })?;
-    
-    Ok(())
+
+    #[test]
+    fn test_validate_circuit_type() {
+        // Valid circuit types
+        assert!(validate_circuit_type("wrapped_asset_mint").is_ok());
+        assert!(validate_circuit_type("wrapped_asset_burn").is_ok());
+        assert!(validate_circuit_type("transfer").is_ok());
+        assert!(validate_circuit_type("native_asset_create").is_ok());
+        assert!(validate_circuit_type("native_asset_mint").is_ok());
+        assert!(validate_circuit_type("native_asset_burn").is_ok());
+        assert!(validate_circuit_type("add_liquidity").is_ok());
+        assert!(validate_circuit_type("remove_liquidity").is_ok());
+        assert!(validate_circuit_type("swap").is_ok());
+
+        // Invalid circuit types
+        assert!(validate_circuit_type("invalid").is_err());
+        assert!(validate_circuit_type("").is_err());
+    }
+
+    #[test]
+    fn test_validate_batch_size() {
+        // Valid batch sizes
+        assert!(validate_batch_size(1).is_ok());
+        assert!(validate_batch_size(16).is_ok());
+
+        // Invalid batch sizes
+        assert!(validate_batch_size(0).is_err());
+        assert!(validate_batch_size(17).is_err());
+    }
+
+    #[test]
+    fn test_validate_u64() {
+        // Valid u64 values
+        assert_eq!(validate_u64(&json!(123), "test").unwrap(), 123);
+        assert_eq!(validate_u64(&json!("123"), "test").unwrap(), 123);
+        assert_eq!(validate_u64(&json!("0x7b"), "test").unwrap(), 123);
+
+        // Invalid u64 values
+        assert!(validate_u64(&json!(-1), "test").is_err());
+        assert!(validate_u64(&json!("invalid"), "test").is_err());
+        assert!(validate_u64(&json!(true), "test").is_err());
+    }
+
+    #[test]
+    fn test_validate_bool() {
+        // Valid boolean values
+        assert_eq!(validate_bool(&json!(true), "test").unwrap(), true);
+        assert_eq!(validate_bool(&json!(false), "test").unwrap(), false);
+        assert_eq!(validate_bool(&json!("true"), "test").unwrap(), true);
+        assert_eq!(validate_bool(&json!("false"), "test").unwrap(), false);
+        assert_eq!(validate_bool(&json!(1), "test").unwrap(), true);
+        assert_eq!(validate_bool(&json!(0), "test").unwrap(), false);
+
+        // Invalid boolean values
+        assert!(validate_bool(&json!("invalid"), "test").is_err());
+        assert!(validate_bool(&json!(2), "test").is_err());
+        assert!(validate_bool(&json!(null), "test").is_err());
+    }
 }

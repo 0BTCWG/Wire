@@ -9,9 +9,9 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use crate::core::{UTXOTarget, PublicKeyTarget, SignatureTarget};
 use crate::core::proof::{serialize_proof, SerializableProof};
-use crate::errors::{WireError, ProofError, WireResult};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
+use crate::errors::{ProofError, WireError, WireResult};
 use crate::gadgets::{calculate_and_register_nullifier, verify_message_signature};
 
 /// Circuit for burning wrapped Bitcoin (wBTC)
@@ -22,19 +22,19 @@ use crate::gadgets::{calculate_and_register_nullifier, verify_message_signature}
 pub struct WrappedAssetBurnCircuit {
     /// The wBTC UTXO to burn
     pub input_utxo: UTXOTarget,
-    
+
     /// The sender's public key
     pub sender_pk: PublicKeyTarget,
-    
+
     /// The sender's signature
     pub sender_sig: SignatureTarget,
-    
+
     /// The destination BTC address data
     pub destination_btc_address: Vec<Target>,
-    
+
     /// Optional fee quote from the custodian
     pub fee_quote: Option<crate::gadgets::fee::SignedQuoteTarget>,
-    
+
     /// The custodian's public key (for verifying the fee quote)
     pub custodian_pk: Option<PublicKeyTarget>,
 }
@@ -53,42 +53,34 @@ impl WrappedAssetBurnCircuit {
         message.push(self.input_utxo.amount_target);
         message.extend_from_slice(&self.input_utxo.salt_target);
         message.extend_from_slice(&self.destination_btc_address);
-        
+
         // Add fee quote to the message if present
         if let Some(fee_quote) = &self.fee_quote {
             message.push(fee_quote.fee_btc);
             message.push(fee_quote.expiry);
         }
-        
+
         // Use our improved signature verification with domain separation
-        let is_valid = verify_message_signature(
-            builder,
-            &message,
-            &self.sender_sig,
-            &self.sender_pk,
-        );
-        
+        let is_valid =
+            verify_message_signature(builder, &message, &self.sender_sig, &self.sender_pk);
+
         // Ensure the signature is valid
         builder.assert_one(is_valid);
-        
+
         // Verify the fee quote signature if present
         if let (Some(fee_quote), Some(custodian_pk)) = (&self.fee_quote, &self.custodian_pk) {
             let mut fee_message = Vec::new();
             fee_message.push(fee_quote.fee_btc);
             fee_message.push(fee_quote.expiry);
-            
+
             // Use our improved signature verification with domain separation for fee quotes
-            let fee_sig_valid = verify_message_signature(
-                builder,
-                &fee_message,
-                &fee_quote.signature,
-                custodian_pk,
-            );
-            
+            let fee_sig_valid =
+                verify_message_signature(builder, &fee_message, &fee_quote.signature, custodian_pk);
+
             // Ensure the fee signature is valid
             builder.assert_one(fee_sig_valid);
         }
-        
+
         // Calculate and register the nullifier
         let nullifier = calculate_and_register_nullifier(
             builder,
@@ -96,16 +88,17 @@ impl WrappedAssetBurnCircuit {
             &self.input_utxo.asset_id_target,
             self.input_utxo.amount_target,
             sender_sk,
-        ).expect("Failed to calculate nullifier");
-        
+        )
+        .expect("Failed to calculate nullifier");
+
         // Register the amount as a public input
         builder.register_public_input(self.input_utxo.amount_target);
-        
+
         // Register the destination BTC address as public inputs
         for target in &self.destination_btc_address {
             builder.register_public_input(*target);
         }
-        
+
         // Register the fee as a public input if present
         if let Some(fee_quote) = &self.fee_quote {
             builder.register_public_input(fee_quote.fee_btc);
@@ -114,26 +107,26 @@ impl WrappedAssetBurnCircuit {
             let zero = builder.zero();
             builder.register_public_input(zero);
         }
-        
+
         // Register the nullifier as a public input
         builder.register_public_input(nullifier);
-        
+
         // Register a zero as a public input (placeholder for future use)
         let zero = builder.zero();
         builder.register_public_input(zero);
-        
+
         nullifier
     }
-    
+
     /// Create and build the circuit
     pub fn create_circuit() -> CircuitData<GoldilocksField, PoseidonGoldilocksConfig, 2> {
         // Create a new circuit
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
-        
+
         // Create a sender secret key
         let _sender_sk_target = builder.add_virtual_target();
-        
+
         // Create a sender public key
         let sender_pk = PublicKeyTarget {
             point: crate::core::PointTarget {
@@ -141,7 +134,7 @@ impl WrappedAssetBurnCircuit {
                 y: builder.add_virtual_target(),
             },
         };
-        
+
         // Create a signature
         let signature = SignatureTarget {
             r_point: crate::core::PointTarget {
@@ -150,15 +143,15 @@ impl WrappedAssetBurnCircuit {
             },
             s_scalar: builder.add_virtual_target(),
         };
-        
+
         // Create an input UTXO
         let input_utxo = UTXOTarget::add_virtual(&mut builder, crate::core::HASH_SIZE);
-        
+
         // Create a destination BTC address
         let destination_btc_address: Vec<_> = (0..20) // Assuming P2PKH address
             .map(|_| builder.add_virtual_target())
             .collect();
-        
+
         // Create the circuit
         let circuit = WrappedAssetBurnCircuit {
             input_utxo,
@@ -168,15 +161,15 @@ impl WrappedAssetBurnCircuit {
             fee_quote: None, // No fee quote for the basic circuit
             custodian_pk: None,
         };
-        
+
         // Build the circuit
         let zero = builder.zero();
         circuit.build(&mut builder, zero);
-        
+
         // Build the circuit data
         builder.build()
     }
-    
+
     /// Generate a proof for the circuit with the given inputs
     pub fn generate_proof(
         &self,
@@ -202,10 +195,10 @@ impl WrappedAssetBurnCircuit {
         // Create the circuit
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
-        
+
         // Create a sender secret key
         let sender_sk_target = builder.add_virtual_target();
-        
+
         // Create a sender public key
         let sender_pk_target = PublicKeyTarget {
             point: crate::core::PointTarget {
@@ -213,7 +206,7 @@ impl WrappedAssetBurnCircuit {
                 y: builder.add_virtual_target(),
             },
         };
-        
+
         // Create a signature
         let signature_target = SignatureTarget {
             r_point: crate::core::PointTarget {
@@ -222,7 +215,7 @@ impl WrappedAssetBurnCircuit {
             },
             s_scalar: builder.add_virtual_target(),
         };
-        
+
         // Create an input UTXO
         let input_utxo_target = UTXOTarget {
             owner_pubkey_hash_target: (0..input_utxo_owner_pubkey_hash.len())
@@ -236,21 +229,21 @@ impl WrappedAssetBurnCircuit {
                 .map(|_| builder.add_virtual_target())
                 .collect(),
         };
-        
+
         // Create a destination BTC address
         let destination_btc_address_target: Vec<_> = (0..destination_btc_address.len())
             .map(|_| builder.add_virtual_target())
             .collect();
-        
+
         // Create fee quote and custodian public key if provided
-        let (fee_quote_target, custodian_pk_target) = if fee_btc.is_some() 
-            && fee_expiry.is_some() 
-            && fee_signature_r_x.is_some() 
-            && fee_signature_r_y.is_some() 
-            && fee_signature_s.is_some() 
-            && custodian_pk_x.is_some() 
-            && custodian_pk_y.is_some() {
-            
+        let (fee_quote_target, custodian_pk_target) = if fee_btc.is_some()
+            && fee_expiry.is_some()
+            && fee_signature_r_x.is_some()
+            && fee_signature_r_y.is_some()
+            && fee_signature_s.is_some()
+            && custodian_pk_x.is_some()
+            && custodian_pk_y.is_some()
+        {
             let fee_quote = crate::gadgets::fee::SignedQuoteTarget {
                 fee_btc: builder.add_virtual_target(),
                 expiry: builder.add_virtual_target(),
@@ -262,19 +255,19 @@ impl WrappedAssetBurnCircuit {
                     s_scalar: builder.add_virtual_target(),
                 },
             };
-            
+
             let custodian_pk = PublicKeyTarget {
                 point: crate::core::PointTarget {
                     x: builder.add_virtual_target(),
                     y: builder.add_virtual_target(),
                 },
             };
-            
+
             (Some(fee_quote), Some(custodian_pk))
         } else {
             (None, None)
         };
-        
+
         // Create the circuit
         let circuit = WrappedAssetBurnCircuit {
             input_utxo: input_utxo_target.clone(),
@@ -284,85 +277,156 @@ impl WrappedAssetBurnCircuit {
             fee_quote: fee_quote_target.clone(),
             custodian_pk: custodian_pk_target.clone(),
         };
-        
+
         // Build the circuit
         let zero = builder.zero();
         circuit.build(&mut builder, zero);
-        
+
         // Build the circuit data
         let circuit_data = builder.build();
-        
+
         // Create a partial witness
         let mut pw = PartialWitness::new();
-        
+
         // Set the witness values
-        pw.set_target(sender_sk_target, GoldilocksField::from_canonical_u64(sender_sk));
-        
-        pw.set_target(sender_pk_target.point.x, GoldilocksField::from_canonical_u64(sender_pk_x));
-        pw.set_target(sender_pk_target.point.y, GoldilocksField::from_canonical_u64(sender_pk_y));
-        
-        pw.set_target(signature_target.r_point.x, GoldilocksField::from_canonical_u64(signature_r_x));
-        pw.set_target(signature_target.r_point.y, GoldilocksField::from_canonical_u64(signature_r_y));
-        pw.set_target(signature_target.s_scalar, GoldilocksField::from_canonical_u64(signature_s));
-        
-        for i in 0..input_utxo_owner_pubkey_hash.len().min(input_utxo_target.owner_pubkey_hash_target.len()) {
+        pw.set_target(
+            sender_sk_target,
+            GoldilocksField::from_canonical_u64(sender_sk),
+        );
+
+        pw.set_target(
+            sender_pk_target.point.x,
+            GoldilocksField::from_canonical_u64(sender_pk_x),
+        );
+        pw.set_target(
+            sender_pk_target.point.y,
+            GoldilocksField::from_canonical_u64(sender_pk_y),
+        );
+
+        pw.set_target(
+            signature_target.r_point.x,
+            GoldilocksField::from_canonical_u64(signature_r_x),
+        );
+        pw.set_target(
+            signature_target.r_point.y,
+            GoldilocksField::from_canonical_u64(signature_r_y),
+        );
+        pw.set_target(
+            signature_target.s_scalar,
+            GoldilocksField::from_canonical_u64(signature_s),
+        );
+
+        for i in 0..input_utxo_owner_pubkey_hash
+            .len()
+            .min(input_utxo_target.owner_pubkey_hash_target.len())
+        {
             pw.set_target(
                 input_utxo_target.owner_pubkey_hash_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_owner_pubkey_hash[i] as u64),
             );
         }
-        
-        for i in 0..input_utxo_asset_id.len().min(input_utxo_target.asset_id_target.len()) {
+
+        for i in 0..input_utxo_asset_id
+            .len()
+            .min(input_utxo_target.asset_id_target.len())
+        {
             pw.set_target(
                 input_utxo_target.asset_id_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_asset_id[i] as u64),
             );
         }
-        
-        pw.set_target(input_utxo_target.amount_target, GoldilocksField::from_canonical_u64(input_utxo_amount));
-        
-        for i in 0..input_utxo_salt.len().min(input_utxo_target.salt_target.len()) {
+
+        pw.set_target(
+            input_utxo_target.amount_target,
+            GoldilocksField::from_canonical_u64(input_utxo_amount),
+        );
+
+        for i in 0..input_utxo_salt
+            .len()
+            .min(input_utxo_target.salt_target.len())
+        {
             pw.set_target(
                 input_utxo_target.salt_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_salt[i] as u64),
             );
         }
-        
-        for i in 0..destination_btc_address.len().min(destination_btc_address_target.len()) {
+
+        for i in 0..destination_btc_address
+            .len()
+            .min(destination_btc_address_target.len())
+        {
             pw.set_target(
                 destination_btc_address_target[i],
                 GoldilocksField::from_canonical_u64(destination_btc_address[i] as u64),
             );
         }
-        
+
         // Set fee quote and custodian public key values if provided
-        if let (Some(fee_quote), Some(custodian_pk), Some(fee_btc_val), Some(fee_expiry_val), 
-                Some(fee_sig_r_x), Some(fee_sig_r_y), Some(fee_sig_s),
-                Some(cust_pk_x), Some(cust_pk_y)) = 
-            (&fee_quote_target, &custodian_pk_target, fee_btc, fee_expiry, 
-             fee_signature_r_x, fee_signature_r_y, fee_signature_s,
-             custodian_pk_x, custodian_pk_y) {
-            
-            pw.set_target(fee_quote.fee_btc, GoldilocksField::from_canonical_u64(fee_btc_val));
-            pw.set_target(fee_quote.expiry, GoldilocksField::from_canonical_u64(fee_expiry_val));
-            
-            pw.set_target(fee_quote.signature.r_point.x, GoldilocksField::from_canonical_u64(fee_sig_r_x));
-            pw.set_target(fee_quote.signature.r_point.y, GoldilocksField::from_canonical_u64(fee_sig_r_y));
-            pw.set_target(fee_quote.signature.s_scalar, GoldilocksField::from_canonical_u64(fee_sig_s));
-            
-            pw.set_target(custodian_pk.point.x, GoldilocksField::from_canonical_u64(cust_pk_x));
-            pw.set_target(custodian_pk.point.y, GoldilocksField::from_canonical_u64(cust_pk_y));
+        if let (
+            Some(fee_quote),
+            Some(custodian_pk),
+            Some(fee_btc_val),
+            Some(fee_expiry_val),
+            Some(fee_sig_r_x),
+            Some(fee_sig_r_y),
+            Some(fee_sig_s),
+            Some(cust_pk_x),
+            Some(cust_pk_y),
+        ) = (
+            &fee_quote_target,
+            &custodian_pk_target,
+            fee_btc,
+            fee_expiry,
+            fee_signature_r_x,
+            fee_signature_r_y,
+            fee_signature_s,
+            custodian_pk_x,
+            custodian_pk_y,
+        ) {
+            pw.set_target(
+                fee_quote.fee_btc,
+                GoldilocksField::from_canonical_u64(fee_btc_val),
+            );
+            pw.set_target(
+                fee_quote.expiry,
+                GoldilocksField::from_canonical_u64(fee_expiry_val),
+            );
+
+            pw.set_target(
+                fee_quote.signature.r_point.x,
+                GoldilocksField::from_canonical_u64(fee_sig_r_x),
+            );
+            pw.set_target(
+                fee_quote.signature.r_point.y,
+                GoldilocksField::from_canonical_u64(fee_sig_r_y),
+            );
+            pw.set_target(
+                fee_quote.signature.s_scalar,
+                GoldilocksField::from_canonical_u64(fee_sig_s),
+            );
+
+            pw.set_target(
+                custodian_pk.point.x,
+                GoldilocksField::from_canonical_u64(cust_pk_x),
+            );
+            pw.set_target(
+                custodian_pk.point.y,
+                GoldilocksField::from_canonical_u64(cust_pk_y),
+            );
         }
-        
+
         // Generate the proof
-        let proof = circuit_data.prove(pw)
-            .map_err(|e| WireError::ProofError(ProofError::GenerationError(format!("Failed to generate proof: {}", e))))?;
-        
+        let proof = circuit_data.prove(pw).map_err(|e| {
+            WireError::ProofError(ProofError::GenerationError(format!(
+                "Failed to generate proof: {}",
+                e
+            )))
+        })?;
+
         // Serialize the proof
-        serialize_proof(&proof)
-            .map_err(|e| WireError::ProofError(ProofError::from(e)))
+        serialize_proof(&proof).map_err(|e| WireError::ProofError(ProofError::from(e)))
     }
-    
+
     /// Generate a proof for the circuit with the given inputs (static method)
     pub fn generate_proof_static(
         input_utxo_owner_pubkey_hash: &[u8],
@@ -387,10 +451,10 @@ impl WrappedAssetBurnCircuit {
         // Create a new circuit
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
-        
+
         // Create a sender secret key
         let _sender_sk_target = builder.add_virtual_target();
-        
+
         // Create a sender public key
         let sender_pk_target = PublicKeyTarget {
             point: crate::core::PointTarget {
@@ -398,7 +462,7 @@ impl WrappedAssetBurnCircuit {
                 y: builder.add_virtual_target(),
             },
         };
-        
+
         // Create a signature
         let signature_target = SignatureTarget {
             r_point: crate::core::PointTarget {
@@ -407,7 +471,7 @@ impl WrappedAssetBurnCircuit {
             },
             s_scalar: builder.add_virtual_target(),
         };
-        
+
         // Create an input UTXO
         let input_utxo_target = UTXOTarget {
             owner_pubkey_hash_target: (0..input_utxo_owner_pubkey_hash.len())
@@ -421,12 +485,12 @@ impl WrappedAssetBurnCircuit {
                 .map(|_| builder.add_virtual_target())
                 .collect(),
         };
-        
+
         // Create a destination BTC address
         let destination_btc_address_target: Vec<_> = (0..destination_btc_address.len())
             .map(|_| builder.add_virtual_target())
             .collect();
-        
+
         // Create the circuit instance
         let circuit = WrappedAssetBurnCircuit {
             input_utxo: input_utxo_target,
@@ -436,7 +500,7 @@ impl WrappedAssetBurnCircuit {
             fee_quote: None,
             custodian_pk: None,
         };
-        
+
         // Generate the proof
         circuit.generate_proof(
             input_utxo_owner_pubkey_hash,
@@ -459,22 +523,27 @@ impl WrappedAssetBurnCircuit {
             custodian_pk_y,
         )
     }
-    
+
     /// Verify a proof for this circuit
     pub fn verify_proof(serializable_proof: &SerializableProof) -> WireResult<()> {
         let circuit_data = Self::create_circuit();
-        let proof = serializable_proof.to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
+        let proof = serializable_proof
+            .to_proof::<GoldilocksField, PoseidonGoldilocksConfig, 2>(&circuit_data.common)
             .map_err(|e| WireError::ProofError(ProofError::from(e)))?;
-        
-        circuit_data.verify(proof)
-            .map_err(|e| WireError::ProofError(ProofError::VerificationError(format!("Failed to verify proof: {}", e))))
+
+        circuit_data.verify(proof).map_err(|e| {
+            WireError::ProofError(ProofError::VerificationError(format!(
+                "Failed to verify proof: {}",
+                e
+            )))
+        })
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    
+
     #[test]
     fn test_wrapped_asset_burn() {
         // This is a placeholder test

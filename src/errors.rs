@@ -1,30 +1,30 @@
 // Error handling module for the 0BTC Wire system
 // Provides structured error types for all modules
 
-use std::fmt;
 use std::error::Error;
+use std::fmt;
 
 /// Core error type for the 0BTC Wire system
 #[derive(Debug)]
 pub enum WireError {
     // Cryptographic errors
     CryptoError(CryptoError),
-    
+
     // Circuit errors
     CircuitError(CircuitError),
-    
+
     // Input/output errors
     IOError(IOError),
-    
+
     // Proof errors
     ProofError(ProofError),
-    
+
     // Validation errors
     ValidationError(ValidationError),
-    
+
     // Batch processing errors
     BatchProcessingError(String),
-    
+
     // Generic errors
     GenericError(String),
 }
@@ -86,22 +86,22 @@ impl From<crate::mpc::MPCError> for WireError {
 pub enum CryptoError {
     // Hash errors
     HashError(String),
-    
+
     // Signature errors
     SignatureError(String),
-    
+
     // Key errors
     KeyError(String),
-    
+
     // Curve errors
     CurveError(String),
-    
+
     // Nullifier errors
     NullifierError(String),
-    
+
     // Merkle tree errors
     MerkleError(String),
-    
+
     // Nonce errors
     NonceError(String),
 }
@@ -125,13 +125,13 @@ impl fmt::Display for CryptoError {
 pub enum CircuitError {
     // Circuit creation errors
     CreationError(String),
-    
+
     // Constraint errors
     ConstraintError(String),
-    
+
     // Witness errors
     WitnessError(String),
-    
+
     // Circuit-specific errors
     WrappedAssetMintError(String),
     WrappedAssetBurnError(String),
@@ -139,6 +139,14 @@ pub enum CircuitError {
     NativeAssetCreateError(String),
     NativeAssetMintError(String),
     NativeAssetBurnError(String),
+    ArithmeticError(String),
+    DivisionByZero(String),
+    OverflowError(String),
+    ProofGenerationError(String),
+    ProofVerificationError(String),
+    HashError(String),
+    KeyDerivationError(String),
+    NullifierError(String),
 }
 
 impl fmt::Display for CircuitError {
@@ -153,6 +161,16 @@ impl fmt::Display for CircuitError {
             CircuitError::NativeAssetCreateError(e) => write!(f, "NativeAssetCreate error: {}", e),
             CircuitError::NativeAssetMintError(e) => write!(f, "NativeAssetMint error: {}", e),
             CircuitError::NativeAssetBurnError(e) => write!(f, "NativeAssetBurn error: {}", e),
+            CircuitError::ArithmeticError(e) => write!(f, "Arithmetic operation failed: {}", e),
+            CircuitError::DivisionByZero(e) => write!(f, "Division by zero error: {}", e),
+            CircuitError::OverflowError(e) => write!(f, "Arithmetic overflow error: {}", e),
+            CircuitError::ProofGenerationError(e) => write!(f, "Proof generation failed: {}", e),
+            CircuitError::ProofVerificationError(e) => {
+                write!(f, "Proof verification failed: {}", e)
+            }
+            CircuitError::HashError(e) => write!(f, "Hash operation failed: {}", e),
+            CircuitError::KeyDerivationError(e) => write!(f, "Key derivation failed: {}", e),
+            CircuitError::NullifierError(e) => write!(f, "Nullifier operation failed: {}", e),
         }
     }
 }
@@ -162,16 +180,16 @@ impl fmt::Display for CircuitError {
 pub enum IOError {
     // File system errors
     FileSystem(String),
-    
+
     // Serialization errors
     SerializationError(String),
-    
+
     // Deserialization errors
     DeserializationError(String),
-    
+
     // Path errors
     PathError(String),
-    
+
     // Permission errors
     PermissionError(String),
 }
@@ -193,19 +211,19 @@ impl fmt::Display for IOError {
 pub enum ProofError {
     // Proof generation errors
     GenerationError(String),
-    
+
     // Proof verification errors
     VerificationError(String),
-    
+
     // Proof serialization errors
     SerializationError(String),
-    
+
     // Proof deserialization errors
     DeserializationError(String),
-    
+
     // Proof aggregation errors
     AggregationError(String),
-    
+
     // Proof compatibility errors
     CompatibilityError(String),
 }
@@ -226,10 +244,18 @@ impl fmt::Display for ProofError {
 impl From<crate::core::proof::ProofError> for ProofError {
     fn from(error: crate::core::proof::ProofError) -> Self {
         match error {
-            crate::core::proof::ProofError::ProofGenerationError(msg) => ProofError::GenerationError(msg),
-            crate::core::proof::ProofError::VerificationError(msg) => ProofError::VerificationError(msg),
-            crate::core::proof::ProofError::SerializationError(msg) => ProofError::SerializationError(msg),
-            crate::core::proof::ProofError::DeserializationError(msg) => ProofError::DeserializationError(msg),
+            crate::core::proof::ProofError::ProofGenerationError(msg) => {
+                ProofError::GenerationError(msg)
+            }
+            crate::core::proof::ProofError::VerificationError(msg) => {
+                ProofError::VerificationError(msg)
+            }
+            crate::core::proof::ProofError::SerializationError(msg) => {
+                ProofError::SerializationError(msg)
+            }
+            crate::core::proof::ProofError::DeserializationError(msg) => {
+                ProofError::DeserializationError(msg)
+            }
         }
     }
 }
@@ -239,22 +265,22 @@ impl From<crate::core::proof::ProofError> for ProofError {
 pub enum ValidationError {
     // Missing field errors
     MissingField(String),
-    
+
     // Invalid type errors
     InvalidType(String),
-    
+
     // Invalid value errors
     InvalidValue(String),
-    
+
     // Invalid length errors
     InvalidLength(String),
-    
+
     // Invalid format errors
     InvalidFormat(String),
-    
+
     // Input validation errors
     InputValidationError(String),
-    
+
     // Security violation errors
     SecurityViolation(String),
 }
@@ -287,7 +313,7 @@ pub fn sanitize_error_message(error: &WireError) -> String {
             CryptoError::MerkleError(_) => "Merkle tree operation failed".to_string(),
             CryptoError::NonceError(_) => "Nonce operation failed".to_string(),
         },
-        
+
         // For proof errors, provide generic messages
         WireError::ProofError(e) => match e {
             ProofError::VerificationError(_) => "Proof verification failed".to_string(),
@@ -297,18 +323,30 @@ pub fn sanitize_error_message(error: &WireError) -> String {
             ProofError::AggregationError(_) => "Proof aggregation failed".to_string(),
             ProofError::CompatibilityError(_) => "Proof compatibility check failed".to_string(),
         },
-        
-        // For validation errors, we can be more specific
+
+        // For validation errors, we can be more specific but still sanitize field names
         WireError::ValidationError(e) => match e {
-            ValidationError::MissingField(field) => format!("Missing required field: {}", field),
-            ValidationError::InvalidType(field) => format!("Invalid type for field: {}", field),
-            ValidationError::InvalidValue(field) => format!("Invalid value for field: {}", field),
-            ValidationError::InvalidLength(field) => format!("Invalid length for field: {}", field),
-            ValidationError::InvalidFormat(field) => format!("Invalid format for field: {}", field),
-            ValidationError::InputValidationError(field) => format!("Input validation error for field: {}", field),
+            ValidationError::MissingField(field) => {
+                sanitize_field_name("Missing required field", field)
+            }
+            ValidationError::InvalidType(field) => {
+                sanitize_field_name("Invalid type for field", field)
+            }
+            ValidationError::InvalidValue(field) => {
+                sanitize_field_name("Invalid value for field", field)
+            }
+            ValidationError::InvalidLength(field) => {
+                sanitize_field_name("Invalid length for field", field)
+            }
+            ValidationError::InvalidFormat(field) => {
+                sanitize_field_name("Invalid format for field", field)
+            }
+            ValidationError::InputValidationError(field) => {
+                sanitize_field_name("Input validation error for field", field)
+            }
             ValidationError::SecurityViolation(_) => "Security violation detected".to_string(),
         },
-        
+
         // For I/O errors, provide generic messages
         WireError::IOError(e) => match e {
             IOError::FileSystem(_) => "File system operation failed".to_string(),
@@ -317,32 +355,95 @@ pub fn sanitize_error_message(error: &WireError) -> String {
             IOError::PathError(_) => "Invalid file path".to_string(),
             IOError::PermissionError(_) => "Permission denied".to_string(),
         },
-        
+
         // For circuit errors, provide generic messages
         WireError::CircuitError(e) => match e {
             CircuitError::CreationError(_) => "Circuit creation failed".to_string(),
             CircuitError::ConstraintError(_) => "Circuit constraint not satisfied".to_string(),
             CircuitError::WitnessError(_) => "Circuit witness generation failed".to_string(),
-            CircuitError::WrappedAssetMintError(_) => "WrappedAssetMint circuit operation failed".to_string(),
-            CircuitError::WrappedAssetBurnError(_) => "WrappedAssetBurn circuit operation failed".to_string(),
+            CircuitError::WrappedAssetMintError(_) => {
+                "WrappedAssetMint circuit operation failed".to_string()
+            }
+            CircuitError::WrappedAssetBurnError(_) => {
+                "WrappedAssetBurn circuit operation failed".to_string()
+            }
             CircuitError::TransferError(_) => "Transfer circuit operation failed".to_string(),
-            CircuitError::NativeAssetCreateError(_) => "NativeAssetCreate circuit operation failed".to_string(),
-            CircuitError::NativeAssetMintError(_) => "NativeAssetMint circuit operation failed".to_string(),
-            CircuitError::NativeAssetBurnError(_) => "NativeAssetBurn circuit operation failed".to_string(),
+            CircuitError::NativeAssetCreateError(_) => {
+                "NativeAssetCreate circuit operation failed".to_string()
+            }
+            CircuitError::NativeAssetMintError(_) => {
+                "NativeAssetMint circuit operation failed".to_string()
+            }
+            CircuitError::NativeAssetBurnError(_) => {
+                "NativeAssetBurn circuit operation failed".to_string()
+            }
+            CircuitError::ArithmeticError(_) => "Arithmetic operation failed".to_string(),
+            CircuitError::DivisionByZero(_) => "Division by zero error".to_string(),
+            CircuitError::OverflowError(_) => "Arithmetic overflow error".to_string(),
+            CircuitError::ProofGenerationError(_) => "Proof generation failed".to_string(),
+            CircuitError::ProofVerificationError(_) => "Proof verification failed".to_string(),
+            CircuitError::HashError(_) => "Hash operation failed".to_string(),
+            CircuitError::KeyDerivationError(_) => "Key derivation failed".to_string(),
+            CircuitError::NullifierError(_) => "Nullifier operation failed".to_string(),
         },
-        
+
         // For batch processing errors, provide generic messages
         WireError::BatchProcessingError(_) => "Batch processing failed".to_string(),
-        
+
         // For generic errors, sanitize to remove potential sensitive information
         WireError::GenericError(e) => {
-            if e.contains("key") || e.contains("secret") || e.contains("private") {
+            // Check for potentially sensitive information
+            if contains_sensitive_info(e) {
                 "Operation failed".to_string()
             } else {
                 "Operation failed: check input parameters".to_string()
             }
-        },
+        }
     }
+}
+
+/// Helper function to sanitize field names
+fn sanitize_field_name(prefix: &str, field: &str) -> String {
+    // List of sensitive field names that should not be exposed
+    const SENSITIVE_FIELDS: [&str; 8] = [
+        "key",
+        "secret",
+        "private",
+        "password",
+        "seed",
+        "salt",
+        "signature",
+        "hash",
+    ];
+
+    // Check if the field name contains any sensitive terms
+    if SENSITIVE_FIELDS
+        .iter()
+        .any(|&sensitive| field.to_lowercase().contains(sensitive))
+    {
+        format!("{}", prefix)
+    } else {
+        format!("{}: {}", prefix, field)
+    }
+}
+
+/// Helper function to check if a string contains sensitive information
+fn contains_sensitive_info(s: &str) -> bool {
+    let s_lower = s.to_lowercase();
+
+    // Check for various types of sensitive information
+    s_lower.contains("key")
+        || s_lower.contains("secret")
+        || s_lower.contains("private")
+        || s_lower.contains("password")
+        || s_lower.contains("seed")
+        || s_lower.contains("salt")
+        || s_lower.contains("signature")
+        || s_lower.contains("hash")
+        || s_lower.contains("mnemonic")
+        || s_lower.contains("wallet")
+        || s_lower.contains("address")
+        || s_lower.contains("account")
 }
 
 /// Helper function to log detailed error information for internal use

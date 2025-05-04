@@ -1,9 +1,16 @@
 // Input validation for the 0BTC Wire CLI
-use std::fs;
-use std::path::{Path, PathBuf};
-use std::io;
-use log::{warn};
+use crate::errors::{ValidationError as WireValidationError, WireError};
+use log::warn;
 use serde_json::Value;
+use std::fs;
+use std::io;
+use std::path::{Path, PathBuf};
+
+/// Maximum allowed file size for JSON input files (16MB)
+const MAX_FILE_SIZE: u64 = 16 * 1024 * 1024;
+
+/// Maximum allowed path length
+const MAX_PATH_LENGTH: usize = 4096;
 
 /// Validation result type
 pub type ValidationResult<T> = Result<T, ValidationError>;
@@ -25,6 +32,8 @@ pub enum ValidationError {
     InvalidValue(String),
     /// Security error
     Security(String),
+    /// File too large error
+    FileTooLarge(String),
 }
 
 impl std::fmt::Display for ValidationError {
@@ -37,6 +46,7 @@ impl std::fmt::Display for ValidationError {
             ValidationError::InvalidFieldType(msg) => write!(f, "Invalid field type: {}", msg),
             ValidationError::InvalidValue(msg) => write!(f, "Invalid value: {}", msg),
             ValidationError::Security(msg) => write!(f, "Security error: {}", msg),
+            ValidationError::FileTooLarge(msg) => write!(f, "File too large: {}", msg),
         }
     }
 }
@@ -53,65 +63,108 @@ impl From<serde_json::Error> for ValidationError {
     }
 }
 
+impl From<ValidationError> for WireError {
+    fn from(error: ValidationError) -> Self {
+        match error {
+            ValidationError::MissingField(field) => {
+                WireError::ValidationError(WireValidationError::MissingField(field))
+            }
+            ValidationError::InvalidFieldType(field) => {
+                WireError::ValidationError(WireValidationError::InvalidType(field))
+            }
+            ValidationError::InvalidValue(field) => {
+                WireError::ValidationError(WireValidationError::InvalidValue(field))
+            }
+            ValidationError::InvalidPath(field) => {
+                WireError::ValidationError(WireValidationError::InvalidFormat(field))
+            }
+            ValidationError::Security(msg) => {
+                WireError::ValidationError(WireValidationError::SecurityViolation(msg))
+            }
+            ValidationError::JsonParse(msg) => {
+                WireError::ValidationError(WireValidationError::InvalidFormat(msg))
+            }
+            ValidationError::FileSystem(msg) => {
+                WireError::IOError(crate::errors::IOError::FileSystem(msg))
+            }
+            ValidationError::FileTooLarge(msg) => {
+                WireError::ValidationError(WireValidationError::InvalidLength(msg))
+            }
+        }
+    }
+}
+
 /// Validate a file path
 ///
 /// This function checks that a file path:
 /// 1. Is a valid path (no invalid characters)
-/// 2. Exists (if check_exists is true)
-/// 3. Is a file (if check_exists is true)
-/// 4. Is readable (if check_exists is true)
+/// 2. Is not too long
+/// 3. Exists (if check_exists is true)
+/// 4. Is a file (if check_exists is true)
+/// 5. Is readable (if check_exists is true)
+/// 6. Is not too large (if check_exists is true)
 pub fn validate_file_path(path_str: &str, check_exists: bool) -> ValidationResult<PathBuf> {
+    // Check path length
+    if path_str.len() > MAX_PATH_LENGTH {
+        return Err(ValidationError::InvalidPath(format!(
+            "Path is too long (max {} characters)",
+            MAX_PATH_LENGTH
+        )));
+    }
+
     // Sanitize the path
     let path_str = sanitize_path(path_str)?;
-    
+
     // Create a path object
     let path = Path::new(&path_str);
-    
+
     // Check if the path is absolute
     if !path.is_absolute() {
         return Err(ValidationError::InvalidPath(
             "Path must be absolute".to_string(),
         ));
     }
-    
+
     // Check if the path exists and is a file
     if check_exists {
         if !path.exists() {
-            return Err(ValidationError::InvalidPath(
-                format!("File does not exist: {}", path_str),
-            ));
+            return Err(ValidationError::InvalidPath(format!(
+                "File does not exist: {}",
+                path_str
+            )));
         }
-        
+
         if !path.is_file() {
-            return Err(ValidationError::InvalidPath(
-                format!("Path is not a file: {}", path_str),
-            ));
+            return Err(ValidationError::InvalidPath(format!(
+                "Path is not a file: {}",
+                path_str
+            )));
         }
-        
+
+        // Check file size
+        let metadata = fs::metadata(path)?;
+        if metadata.len() > MAX_FILE_SIZE {
+            return Err(ValidationError::FileTooLarge(format!(
+                "File is too large (max {} bytes): {}",
+                MAX_FILE_SIZE, path_str
+            )));
+        }
+
         // Check if the file is readable
-        match fs::metadata(path) {
-            Ok(metadata) => {
-                // On Unix systems, we can check permissions
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let permissions = metadata.permissions();
-                    let mode = permissions.mode();
-                    if mode & 0o400 == 0 {
-                        return Err(ValidationError::InvalidPath(
-                            format!("File is not readable: {}", path_str),
-                        ));
-                    }
-                }
-            }
-            Err(e) => {
-                return Err(ValidationError::FileSystem(
-                    format!("Failed to get file metadata: {}", e),
-                ));
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let permissions = metadata.permissions();
+            let mode = permissions.mode();
+            if mode & 0o400 == 0 {
+                return Err(ValidationError::InvalidPath(format!(
+                    "File is not readable: {}",
+                    path_str
+                )));
             }
         }
     }
-    
+
     Ok(path.to_path_buf())
 }
 
@@ -119,37 +172,48 @@ pub fn validate_file_path(path_str: &str, check_exists: bool) -> ValidationResul
 ///
 /// This function checks that a directory path:
 /// 1. Is a valid path (no invalid characters)
-/// 2. Exists (if check_exists is true)
-/// 3. Is a directory (if check_exists is true)
-/// 4. Is readable (if check_exists is true)
+/// 2. Is not too long
+/// 3. Exists (if check_exists is true)
+/// 4. Is a directory (if check_exists is true)
+/// 5. Is readable (if check_exists is true)
 pub fn validate_directory_path(path_str: &str, check_exists: bool) -> ValidationResult<PathBuf> {
+    // Check path length
+    if path_str.len() > MAX_PATH_LENGTH {
+        return Err(ValidationError::InvalidPath(format!(
+            "Path is too long (max {} characters)",
+            MAX_PATH_LENGTH
+        )));
+    }
+
     // Sanitize the path
     let path_str = sanitize_path(path_str)?;
-    
+
     // Create a path object
     let path = Path::new(&path_str);
-    
+
     // Check if the path is absolute
     if !path.is_absolute() {
         return Err(ValidationError::InvalidPath(
             "Path must be absolute".to_string(),
         ));
     }
-    
+
     // Check if the path exists and is a directory
     if check_exists {
         if !path.exists() {
-            return Err(ValidationError::InvalidPath(
-                format!("Directory does not exist: {}", path_str),
-            ));
+            return Err(ValidationError::InvalidPath(format!(
+                "Directory does not exist: {}",
+                path_str
+            )));
         }
-        
+
         if !path.is_dir() {
-            return Err(ValidationError::InvalidPath(
-                format!("Path is not a directory: {}", path_str),
-            ));
+            return Err(ValidationError::InvalidPath(format!(
+                "Path is not a directory: {}",
+                path_str
+            )));
         }
-        
+
         // Check if the directory is readable
         match fs::metadata(path) {
             Ok(metadata) => {
@@ -160,20 +224,22 @@ pub fn validate_directory_path(path_str: &str, check_exists: bool) -> Validation
                     let permissions = metadata.permissions();
                     let mode = permissions.mode();
                     if mode & 0o500 == 0 {
-                        return Err(ValidationError::InvalidPath(
-                            format!("Directory is not readable: {}", path_str),
-                        ));
+                        return Err(ValidationError::InvalidPath(format!(
+                            "Directory is not readable: {}",
+                            path_str
+                        )));
                     }
                 }
             }
             Err(e) => {
-                return Err(ValidationError::FileSystem(
-                    format!("Failed to get directory metadata: {}", e),
-                ));
+                return Err(ValidationError::FileSystem(format!(
+                    "Failed to get directory metadata: {}",
+                    e
+                )));
             }
         }
     }
-    
+
     Ok(path.to_path_buf())
 }
 
@@ -181,39 +247,50 @@ pub fn validate_directory_path(path_str: &str, check_exists: bool) -> Validation
 ///
 /// This function checks that an output file path:
 /// 1. Is a valid path (no invalid characters)
-/// 2. Parent directory exists
-/// 3. Parent directory is writable
+/// 2. Is not too long
+/// 3. Parent directory exists
+/// 4. Parent directory is writable
 pub fn validate_output_file_path(path_str: &str) -> ValidationResult<PathBuf> {
+    // Check path length
+    if path_str.len() > MAX_PATH_LENGTH {
+        return Err(ValidationError::InvalidPath(format!(
+            "Path is too long (max {} characters)",
+            MAX_PATH_LENGTH
+        )));
+    }
+
     // Sanitize the path
     let path_str = sanitize_path(path_str)?;
-    
+
     // Create a path object
     let path = Path::new(&path_str);
-    
+
     // Check if the path is absolute
     if !path.is_absolute() {
         return Err(ValidationError::InvalidPath(
             "Path must be absolute".to_string(),
         ));
     }
-    
+
     // Check if the parent directory exists
-    let parent = path.parent().ok_or_else(|| {
-        ValidationError::InvalidPath("Cannot get parent directory".to_string())
-    })?;
-    
+    let parent = path
+        .parent()
+        .ok_or_else(|| ValidationError::InvalidPath("Cannot get parent directory".to_string()))?;
+
     if !parent.exists() {
-        return Err(ValidationError::InvalidPath(
-            format!("Parent directory does not exist: {}", parent.display()),
-        ));
+        return Err(ValidationError::InvalidPath(format!(
+            "Parent directory does not exist: {}",
+            parent.display()
+        )));
     }
-    
+
     if !parent.is_dir() {
-        return Err(ValidationError::InvalidPath(
-            format!("Parent path is not a directory: {}", parent.display()),
-        ));
+        return Err(ValidationError::InvalidPath(format!(
+            "Parent path is not a directory: {}",
+            parent.display()
+        )));
     }
-    
+
     // Check if the parent directory is writable
     match fs::metadata(parent) {
         Ok(metadata) => {
@@ -224,19 +301,21 @@ pub fn validate_output_file_path(path_str: &str) -> ValidationResult<PathBuf> {
                 let permissions = metadata.permissions();
                 let mode = permissions.mode();
                 if mode & 0o200 == 0 {
-                    return Err(ValidationError::InvalidPath(
-                        format!("Parent directory is not writable: {}", parent.display()),
-                    ));
+                    return Err(ValidationError::InvalidPath(format!(
+                        "Parent directory is not writable: {}",
+                        parent.display()
+                    )));
                 }
             }
         }
         Err(e) => {
-            return Err(ValidationError::FileSystem(
-                format!("Failed to get parent directory metadata: {}", e),
-            ));
+            return Err(ValidationError::FileSystem(format!(
+                "Failed to get parent directory metadata: {}",
+                e
+            )));
         }
     }
-    
+
     Ok(path.to_path_buf())
 }
 
@@ -250,17 +329,33 @@ fn sanitize_path(path_str: &str) -> ValidationResult<String> {
             "Path contains null bytes".to_string(),
         ));
     }
-    
+
     // Check for relative path traversal
     if path_str.contains("..") {
         warn!("Path contains relative traversal sequence: {}", path_str);
+        return Err(ValidationError::Security(
+            "Path contains relative traversal sequence".to_string(),
+        ));
     }
-    
+
     // Check for other suspicious patterns
     if path_str.contains("//") || path_str.contains("\\/") || path_str.contains("/\\") {
         warn!("Path contains suspicious patterns: {}", path_str);
+        return Err(ValidationError::Security(
+            "Path contains suspicious patterns".to_string(),
+        ));
     }
-    
+
+    // Check for control characters
+    if path_str
+        .chars()
+        .any(|c| c.is_control() && c != '\n' && c != '\r' && c != '\t')
+    {
+        return Err(ValidationError::Security(
+            "Path contains control characters".to_string(),
+        ));
+    }
+
     // Normalize the path
     let path = Path::new(path_str);
     match path.canonicalize() {
@@ -274,26 +369,27 @@ fn sanitize_path(path_str: &str) -> ValidationResult<String> {
 /// This function checks that a circuit type is valid.
 pub fn validate_circuit_type(circuit_type: &str) -> ValidationResult<String> {
     // List of valid circuit types
-    const VALID_CIRCUIT_TYPES: [&str; 6] = [
+    const VALID_CIRCUIT_TYPES: [&str; 9] = [
         "wrapped_asset_mint",
         "wrapped_asset_burn",
         "transfer",
         "native_asset_create",
         "native_asset_mint",
         "native_asset_burn",
+        "add_liquidity",
+        "remove_liquidity",
+        "swap",
     ];
-    
+
     // Check if the circuit type is valid
     if !VALID_CIRCUIT_TYPES.contains(&circuit_type) {
-        return Err(ValidationError::InvalidValue(
-            format!(
-                "Invalid circuit type: {}. Valid types are: {}",
-                circuit_type,
-                VALID_CIRCUIT_TYPES.join(", ")
-            ),
-        ));
+        return Err(ValidationError::InvalidValue(format!(
+            "Invalid circuit type: {}. Valid types are: {}",
+            circuit_type,
+            VALID_CIRCUIT_TYPES.join(", ")
+        )));
     }
-    
+
     Ok(circuit_type.to_string())
 }
 
@@ -303,10 +399,10 @@ pub fn validate_circuit_type(circuit_type: &str) -> ValidationResult<String> {
 pub fn validate_json_file(path: &Path) -> ValidationResult<Value> {
     // Read the file
     let file_content = fs::read_to_string(path)?;
-    
+
     // Parse the JSON
     let json: Value = serde_json::from_str(&file_content)?;
-    
+
     Ok(json)
 }
 
@@ -320,11 +416,11 @@ pub fn validate_batch_size(batch_size: usize) -> ValidationResult<usize> {
             "Batch size must be greater than 0".to_string(),
         ));
     }
-    
+
     if batch_size > 32 {
         warn!("Large batch size may cause memory issues: {}", batch_size);
     }
-    
+
     Ok(batch_size)
 }
 
@@ -334,38 +430,39 @@ pub fn validate_batch_size(batch_size: usize) -> ValidationResult<usize> {
 pub fn validate_proof_file(path: &Path) -> ValidationResult<Value> {
     // Validate that the file contains valid JSON
     let json = validate_json_file(path)?;
-    
+
     // Check that the JSON has the required fields
     if !json.is_object() {
         return Err(ValidationError::InvalidFieldType(
             "Proof must be a JSON object".to_string(),
         ));
     }
-    
+
     // Check for required fields
     let required_fields = ["proof", "public_inputs"];
     for field in required_fields.iter() {
         if !json.get(field).is_some() {
-            return Err(ValidationError::MissingField(
-                format!("Proof is missing required field: {}", field),
-            ));
+            return Err(ValidationError::MissingField(format!(
+                "Proof is missing required field: {}",
+                field
+            )));
         }
     }
-    
+
     // Check that the proof field is an object
     if !json["proof"].is_object() {
         return Err(ValidationError::InvalidFieldType(
             "Proof field must be an object".to_string(),
         ));
     }
-    
+
     // Check that the public_inputs field is an array
     if !json["public_inputs"].is_array() {
         return Err(ValidationError::InvalidFieldType(
             "public_inputs field must be an array".to_string(),
         ));
     }
-    
+
     Ok(json)
 }
 
@@ -375,25 +472,26 @@ pub fn validate_proof_file(path: &Path) -> ValidationResult<Value> {
 pub fn validate_proof_directory(path: &Path) -> ValidationResult<Vec<PathBuf>> {
     // Check if the path is a directory
     if !path.is_dir() {
-        return Err(ValidationError::InvalidPath(
-            format!("Path is not a directory: {}", path.display()),
-        ));
+        return Err(ValidationError::InvalidPath(format!(
+            "Path is not a directory: {}",
+            path.display()
+        )));
     }
-    
+
     // Get all files in the directory
     let entries = fs::read_dir(path)?;
-    
+
     // Filter for JSON files and validate each one
     let mut proof_files = Vec::new();
     for entry in entries {
         let entry = entry?;
         let file_path = entry.path();
-        
+
         // Skip directories
         if file_path.is_dir() {
             continue;
         }
-        
+
         // Check if the file has a .json extension
         if let Some(extension) = file_path.extension() {
             if extension == "json" {
@@ -403,24 +501,21 @@ pub fn validate_proof_directory(path: &Path) -> ValidationResult<Vec<PathBuf>> {
                         proof_files.push(file_path);
                     }
                     Err(e) => {
-                        warn!(
-                            "Skipping invalid proof file {}: {}",
-                            file_path.display(),
-                            e
-                        );
+                        warn!("Skipping invalid proof file {}: {}", file_path.display(), e);
                     }
                 }
             }
         }
     }
-    
+
     // Check if we found any proof files
     if proof_files.is_empty() {
-        return Err(ValidationError::InvalidValue(
-            format!("No valid proof files found in directory: {}", path.display()),
-        ));
+        return Err(ValidationError::InvalidValue(format!(
+            "No valid proof files found in directory: {}",
+            path.display()
+        )));
     }
-    
+
     Ok(proof_files)
 }
 
@@ -430,7 +525,7 @@ mod tests {
     use std::fs::File;
     use std::io::Write;
     use tempfile::tempdir;
-    
+
     #[test]
     fn test_validate_circuit_type() {
         // Valid circuit types
@@ -440,48 +535,55 @@ mod tests {
         assert!(validate_circuit_type("native_asset_create").is_ok());
         assert!(validate_circuit_type("native_asset_mint").is_ok());
         assert!(validate_circuit_type("native_asset_burn").is_ok());
-        
+        assert!(validate_circuit_type("add_liquidity").is_ok());
+        assert!(validate_circuit_type("remove_liquidity").is_ok());
+        assert!(validate_circuit_type("swap").is_ok());
+
         // Invalid circuit types
         assert!(validate_circuit_type("invalid").is_err());
         assert!(validate_circuit_type("").is_err());
     }
-    
+
     #[test]
     fn test_validate_batch_size() {
         // Valid batch sizes
         assert!(validate_batch_size(1).is_ok());
         assert!(validate_batch_size(8).is_ok());
         assert!(validate_batch_size(32).is_ok());
-        
+
         // Invalid batch sizes
         assert!(validate_batch_size(0).is_err());
     }
-    
+
     #[test]
     fn test_sanitize_path() {
         // Valid paths
         assert!(sanitize_path("/tmp/test").is_ok());
         assert!(sanitize_path("/home/user/test").is_ok());
-        
+
         // Invalid paths
         assert!(sanitize_path("/tmp/test\0").is_err());
+        assert!(sanitize_path("/tmp/../test").is_err());
+        assert!(sanitize_path("/tmp//test").is_err());
+        assert!(sanitize_path("/tmp/\\test").is_err());
+        assert!(sanitize_path("/tmp/test\\").is_err());
     }
-    
+
     #[test]
     fn test_validate_json_file() {
         // Create a temporary directory
         let dir = tempdir().unwrap();
-        
+
         // Create a valid JSON file
         let valid_json_path = dir.path().join("valid.json");
         let mut valid_json_file = File::create(&valid_json_path).unwrap();
         writeln!(valid_json_file, r#"{{"key": "value"}}"#).unwrap();
-        
+
         // Create an invalid JSON file
         let invalid_json_path = dir.path().join("invalid.json");
         let mut invalid_json_file = File::create(&invalid_json_path).unwrap();
         writeln!(invalid_json_file, r#"{{"key": "value""#).unwrap();
-        
+
         // Test validation
         assert!(validate_json_file(&valid_json_path).is_ok());
         assert!(validate_json_file(&invalid_json_path).is_err());

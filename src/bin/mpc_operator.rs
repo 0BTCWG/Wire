@@ -4,15 +4,15 @@
 // to manage distributed key generation, mint attestations, burn processing,
 // and fee consolidation.
 
-use wire_lib::mpc::{self, MPCResult};
 use std::process;
+use wire_lib::mpc::{self, MPCResult};
 
 fn main() {
     // Initialize logging
     env_logger::init_from_env(
-        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info")
+        env_logger::Env::default().filter_or(env_logger::DEFAULT_FILTER_ENV, "info"),
     );
-    
+
     // Run the MPC operator CLI
     if let Err(err) = run() {
         eprintln!("Error: {}", err);

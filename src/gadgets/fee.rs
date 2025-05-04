@@ -4,7 +4,7 @@ use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
-use crate::core::{PublicKeyTarget, UTXOTarget, SignatureTarget};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
 use crate::gadgets::hash::hash_utxo_commitment;
 use crate::utils::nullifier::compute_utxo_commitment_hash as nullifier_hash_utxo_target;
 
@@ -13,10 +13,10 @@ use crate::utils::nullifier::compute_utxo_commitment_hash as nullifier_hash_utxo
 pub struct SignedQuoteTarget {
     /// The fee amount in BTC
     pub fee_btc: Target,
-    
+
     /// The quote expiry timestamp
     pub expiry: Target,
-    
+
     /// The custodian's signature
     pub signature: SignatureTarget,
 }
@@ -43,7 +43,7 @@ pub fn enforce_fee_payment<F: RichField + Extendable<D>, const D: usize>(
     // Convert the UTXO target first
     let converted_utxo = convert_utxo_target(input_wbtc_utxo);
     let message_hash = nullifier_hash_utxo_target(builder, &converted_utxo);
-    
+
     // Verify the signature
     let is_valid = crate::utils::signature::verify_signature_in_circuit_with_targets(
         builder,
@@ -51,32 +51,29 @@ pub fn enforce_fee_payment<F: RichField + Extendable<D>, const D: usize>(
         message_hash,
         signature,
     );
-    
+
     // Ensure the signature is valid
     builder.assert_one(is_valid.target);
-    
+
     // Verify that the input UTXO asset ID matches the expected asset ID (wBTC)
     for i in 0..expected_asset_id.len() {
-        let is_equal = builder.is_equal(
-            input_wbtc_utxo.asset_id_target[i],
-            expected_asset_id[i],
-        );
+        let is_equal = builder.is_equal(input_wbtc_utxo.asset_id_target[i], expected_asset_id[i]);
         builder.assert_one(is_equal.target);
     }
-    
+
     // Verify that the input UTXO has enough funds to pay the fee
     let input_amount = input_wbtc_utxo.amount_target;
-    
+
     // Get zero target
     let zero_target = builder.zero();
-    
+
     // Check if fee_amount <= input_amount (sufficient funds)
     let fee_lte_input = validate_fee_amount(builder, fee_amount, zero_target, input_amount);
     builder.assert_one(fee_lte_input);
-    
+
     // Calculate the change amount
     let change_amount = builder.sub(input_amount, fee_amount);
-    
+
     // Create the fee UTXO
     let fee_utxo = UTXOTarget {
         owner_pubkey_hash_target: reservoir_address_hash.to_vec(),
@@ -84,7 +81,7 @@ pub fn enforce_fee_payment<F: RichField + Extendable<D>, const D: usize>(
         amount_target: fee_amount,
         salt_target: vec![zero_target], // Use a deterministic salt for fee UTXOs
     };
-    
+
     (change_amount, fee_utxo)
 }
 
@@ -112,7 +109,7 @@ pub fn enforce_fee_payment_with_change<F: RichField + Extendable<D>, const D: us
         signature,
         expected_asset_id,
     );
-    
+
     // Create the change UTXO
     let change_utxo = UTXOTarget {
         owner_pubkey_hash_target: input_wbtc_utxo.owner_pubkey_hash_target.clone(),
@@ -120,7 +117,7 @@ pub fn enforce_fee_payment_with_change<F: RichField + Extendable<D>, const D: us
         amount_target: change_amount,
         salt_target: change_salt.to_vec(),
     };
-    
+
     // Calculate and register the change UTXO hash
     let change_utxo_hash_result = hash_utxo_commitment(
         builder,
@@ -129,25 +126,37 @@ pub fn enforce_fee_payment_with_change<F: RichField + Extendable<D>, const D: us
         change_utxo.amount_target,
         &change_utxo.salt_target,
     );
-    
+
     // Register the change UTXO hash as a public input if available
     if let Ok(hash_targets) = change_utxo_hash_result {
         for target in hash_targets {
             builder.register_public_input(target);
         }
     }
-    
+
     change_utxo
 }
 
 /// Convert a core::UTXOTarget to a utils::nullifier::UTXOTarget
 pub fn convert_utxo_target(utxo: &crate::core::UTXOTarget) -> crate::utils::nullifier::UTXOTarget {
     // Extract the first element of each vector, or panic if empty
-    let owner_pubkey_hash = utxo.owner_pubkey_hash_target.get(0).copied().unwrap_or_else(|| panic!("Owner pubkey hash is empty"));
-    let asset_id = utxo.asset_id_target.get(0).copied().unwrap_or_else(|| panic!("Asset ID is empty"));
+    let owner_pubkey_hash = utxo
+        .owner_pubkey_hash_target
+        .get(0)
+        .copied()
+        .unwrap_or_else(|| panic!("Owner pubkey hash is empty"));
+    let asset_id = utxo
+        .asset_id_target
+        .get(0)
+        .copied()
+        .unwrap_or_else(|| panic!("Asset ID is empty"));
     let amount = utxo.amount_target;
-    let salt = utxo.salt_target.get(0).copied().unwrap_or_else(|| panic!("Salt is empty"));
-    
+    let salt = utxo
+        .salt_target
+        .get(0)
+        .copied()
+        .unwrap_or_else(|| panic!("Salt is empty"));
+
     // Create a new UTXOTarget for the nullifier module
     crate::utils::nullifier::UTXOTarget {
         owner_pubkey_hash_target: vec![owner_pubkey_hash],
@@ -175,7 +184,7 @@ pub fn validate_fee_amount<F: RichField + Extendable<D>, const D: usize>(
     let sign_bit_min = min_bits[63];
     // We need to negate the sign bit (if sign bit is 0, then value is non-negative)
     let is_above_min = builder.not(sign_bit_min);
-    
+
     // Check if fee_amount <= max_fee
     let max_diff = builder.sub(max_fee, fee_amount);
     let max_bits = builder.split_le(max_diff, 64);
@@ -183,10 +192,10 @@ pub fn validate_fee_amount<F: RichField + Extendable<D>, const D: usize>(
     let sign_bit_max = max_bits[63];
     // We need to negate the sign bit (if sign bit is 0, then value is non-negative)
     let is_below_max = builder.not(sign_bit_max);
-    
+
     // Both conditions must be true
     let is_valid = builder.and(is_above_min, is_below_max);
-    
+
     is_valid.target
 }
 
@@ -212,16 +221,16 @@ pub fn verify_fee_payment<F: RichField + Extendable<D>, const D: usize>(
     let min_diff = builder.sub(fee_amount, min_required_fee);
     let min_bits = builder.split_le(min_diff, 64);
     let fee_sufficient = builder.not(min_bits[63]);
-    
+
     // Check if the asset ID is correct
     let correct_asset = builder.is_equal(fee_asset_id, expected_asset_id);
-    
+
     // Check if the recipient is correct
     let correct_recipient = builder.is_equal(fee_recipient, expected_recipient);
-    
+
     // All conditions must be true
     let asset_and_recipient = builder.and(correct_asset, correct_recipient);
-    
+
     // Convert BoolTarget to Target for the final result
     let result = builder.and(fee_sufficient, asset_and_recipient);
     result.target
@@ -244,10 +253,10 @@ pub fn calculate_fee<F: RichField + Extendable<D>, const D: usize>(
     // Calculate the size component: tx_size * size_multiplier
     let size_multiplier = builder.constant(F::from_canonical_u64(10)); // 10 satoshis per byte
     let size_component = builder.mul(tx_size, size_multiplier);
-    
+
     // Calculate the congestion component: base_fee * congestion_factor
     let congestion_component = builder.mul(base_fee, congestion_factor);
-    
+
     // Total fee = base_fee + size_component + congestion_component
     let temp_sum = builder.add(base_fee, size_component);
     builder.add(temp_sum, congestion_component)

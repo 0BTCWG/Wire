@@ -1,9 +1,9 @@
-use std::time::Instant;
-use std::path::{Path, PathBuf};
 use log::{debug, info};
+use std::path::{Path, PathBuf};
+use std::time::Instant;
 
-use crate::cli::config::{WireConfig};
-use crate::cli::batch::{BatchOptions, process_batch};
+use crate::cli::batch::{process_batch, BatchOptions};
+use crate::cli::config::WireConfig;
 use crate::cli::workflow::execute_workflow;
 use wire_lib::errors::{ValidationError, WireError, WireResult};
 
@@ -12,10 +12,10 @@ use wire_lib::errors::{ValidationError, WireError, WireResult};
 pub struct CommandOptions {
     /// Configuration file path
     pub config_path: Option<PathBuf>,
-    
+
     /// Whether to enable verbose logging
     pub verbose: bool,
-    
+
     /// Number of threads to use for parallel operations
     pub threads: Option<usize>,
 }
@@ -30,7 +30,10 @@ pub fn execute_config_command(
         "init" => {
             // Create a default configuration file
             WireConfig::create_default(config_path)?;
-            info!("Created default configuration file: {}", config_path.display());
+            info!(
+                "Created default configuration file: {}",
+                config_path.display()
+            );
             Ok(())
         }
         "show" => {
@@ -39,9 +42,12 @@ pub fn execute_config_command(
             println!("{}", serde_json::to_string_pretty(&config).unwrap());
             Ok(())
         }
-        _ => Err(WireError::ValidationError(ValidationError::InputValidationError(
-            format!("Unknown config subcommand: {}", subcommand)
-        ))),
+        _ => Err(WireError::ValidationError(
+            ValidationError::InputValidationError(format!(
+                "Unknown config subcommand: {}",
+                subcommand
+            )),
+        )),
     }
 }
 
@@ -58,47 +64,49 @@ pub fn execute_batch_command(
         Some(path) => WireConfig::load(Path::new(path))?,
         None => WireConfig::default(),
     };
-    
+
     // Create batch options
     let mut batch_options = BatchOptions::from(&config.batch);
     batch_options.input_dir = input_dir.to_path_buf();
     batch_options.output_dir = output_dir.to_path_buf();
     batch_options.verbose = options.verbose;
     batch_options.circuit_type = circuit_type.to_string();
-    
+
     match subcommand {
         "process" => {
             // Process a batch of proofs
             process_batch(&batch_options)?;
             Ok(())
         }
-        _ => Err(WireError::ValidationError(ValidationError::InputValidationError(
-            format!("Unknown batch subcommand: {}", subcommand)
-        ))),
+        _ => Err(WireError::ValidationError(
+            ValidationError::InputValidationError(format!(
+                "Unknown batch subcommand: {}",
+                subcommand
+            )),
+        )),
     }
 }
 
 /// Execute the workflow command
-pub fn execute_workflow_command(
-    workflow_name: &str,
-    options: &CommandOptions,
-) -> WireResult<()> {
+pub fn execute_workflow_command(workflow_name: &str, options: &CommandOptions) -> WireResult<()> {
     // Load configuration
     let config = match &options.config_path {
         Some(path) => WireConfig::load(Path::new(path))?,
         None => {
-            return Err(WireError::ValidationError(ValidationError::InputValidationError(
-                "Configuration file is required for workflow execution".to_string()
-            )));
+            return Err(WireError::ValidationError(
+                ValidationError::InputValidationError(
+                    "Configuration file is required for workflow execution".to_string(),
+                ),
+            ));
         }
     };
-    
+
     // Get the workflow
     let workflow = config.get_workflow(workflow_name)?;
-    
+
     // Execute the workflow
     execute_workflow(workflow, options.verbose)?;
-    
+
     Ok(())
 }
 
@@ -114,33 +122,33 @@ pub fn execute_prove_command(
         Some(path) => WireConfig::load(path)?,
         None => WireConfig::default(),
     };
-    
+
     // Get circuit configuration
     let _circuit_config = config.get_circuit_config(circuit_type)?;
-    
+
     // Apply optimization level
     let optimization_level = _circuit_config.optimization_level;
     debug!("Using optimization level: {}", optimization_level);
-    
+
     // Start timing
     let start_time = Instant::now();
-    
+
     // Generate proof (placeholder for actual implementation)
     info!("Generating proof for circuit type: {}", circuit_type);
     info!("Input file: {}", input_path.display());
     info!("Output file: {}", output_path.display());
-    
+
     // Apply number of threads if specified
     let threads = options.threads.unwrap_or(config.global.threads);
     debug!("Using {} threads", threads);
-    
+
     // Simulate proof generation
     std::thread::sleep(std::time::Duration::from_millis(500));
-    
+
     // End timing
     let elapsed = start_time.elapsed();
     info!("Proof generation completed in {:?}", elapsed);
-    
+
     Ok(())
 }
 
@@ -155,24 +163,24 @@ pub fn execute_verify_command(
         Some(path) => WireConfig::load(Path::new(path))?,
         None => WireConfig::default(),
     };
-    
+
     // Get circuit configuration
     let _circuit_config = config.get_circuit_config(circuit_type)?;
-    
+
     // Start timing
     let start_time = Instant::now();
-    
+
     // Verify proof (placeholder for actual implementation)
     info!("Verifying proof for circuit type: {}", circuit_type);
     info!("Proof file: {}", proof_path.display());
-    
+
     // Simulate proof verification
     std::thread::sleep(std::time::Duration::from_millis(200));
-    
+
     // End timing
     let elapsed = start_time.elapsed();
     info!("Proof verification completed in {:?}", elapsed);
     info!("Verification result: Valid");
-    
+
     Ok(())
 }

@@ -1,7 +1,7 @@
 // Constants for the 0BTC Wire system
+use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::hash::hash_types::NUM_HASH_OUT_ELTS;
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
-use plonky2::field::goldilocks_field::GoldilocksField;
 
 /// Standard recursion-friendly degree
 pub const D: usize = 2;

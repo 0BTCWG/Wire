@@ -18,7 +18,7 @@ fn test_fee_payment_sufficient_funds() {
     // Create a new circuit
     let config = CircuitConfig::standard_recursion_config();
     let mut builder = CircuitBuilder::<F, D>::new(config);
-    
+
     // Create a fee payer public key
     let fee_payer_pk = PublicKeyTarget {
         point: PointTarget {
@@ -26,7 +26,7 @@ fn test_fee_payment_sufficient_funds() {
             y: builder.add_virtual_target(),
         },
     };
-    
+
     // Create an input UTXO for the fee payer
     let input_wbtc_utxo = UTXOTarget {
         owner_pubkey_hash_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
@@ -34,15 +34,14 @@ fn test_fee_payment_sufficient_funds() {
         amount_target: builder.add_virtual_target(),
         salt_target: (0..32).map(|_| builder.add_virtual_target()).collect(),
     };
-    
+
     // Create a fee amount target
     let fee_amount = builder.add_virtual_target();
-    
+
     // Create a fee reservoir address hash
-    let fee_reservoir_address_hash: Vec<Target> = (0..32)
-        .map(|_| builder.add_virtual_target())
-        .collect();
-    
+    let fee_reservoir_address_hash: Vec<Target> =
+        (0..32).map(|_| builder.add_virtual_target()).collect();
+
     // Create a signature
     let signature = SignatureTarget {
         r_point: PointTarget {
@@ -51,7 +50,7 @@ fn test_fee_payment_sufficient_funds() {
         },
         s_scalar: builder.add_virtual_target(),
     };
-    
+
     // Enforce fee payment
     let change_amount = enforce_fee_payment(
         &mut builder,
@@ -61,13 +60,13 @@ fn test_fee_payment_sufficient_funds() {
         &fee_reservoir_address_hash,
         &signature,
     );
-    
+
     // Make the change amount a public input
     builder.register_public_input(change_amount);
-    
+
     // Build the circuit
     let circuit = builder.build::<C>();
-    
+
     // Just verify that the circuit was created successfully
     // Skip proof generation and verification for now
     assert!(circuit.common.gates.len() > 0, "Circuit should have gates");

@@ -25,7 +25,7 @@ pub mod utils {
     use wire_lib::core::proof::SerializableProof;
     use wire_lib::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
     use wire_lib::errors::WireResult;
-    
+
     /// Generate a test key pair
     pub fn generate_test_key_pair() -> (u64, (u64, u64)) {
         // For testing purposes, we use a fixed key pair
@@ -33,10 +33,10 @@ pub mod utils {
         let private_key = 0x1234567890abcdef;
         let public_key_x = 0xfedcba0987654321;
         let public_key_y = 0x1122334455667788;
-        
+
         (private_key, (public_key_x, public_key_y))
     }
-    
+
     /// Generate a test signature
     pub fn generate_test_signature() -> (u64, u64, u64) {
         // For testing purposes, we use a fixed signature
@@ -44,10 +44,10 @@ pub mod utils {
         let r_x = 0xaabbccddeeff0011;
         let r_y = 0x2233445566778899;
         let s = 0x99887766554433221100;
-        
+
         (r_x, r_y, s)
     }
-    
+
     /// Generate a test UTXO
     pub fn generate_test_utxo() -> (Vec<u8>, Vec<u8>, u64, Vec<u8>) {
         // For testing purposes, we use a fixed UTXO
@@ -56,10 +56,10 @@ pub mod utils {
         let asset_id = vec![0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01];
         let amount = 1_000_000; // 0.01 BTC in satoshis
         let salt = vec![0xff, 0xee, 0xdd, 0xcc, 0xbb, 0xaa, 0x99, 0x88];
-        
+
         (owner_pubkey_hash, asset_id, amount, salt)
     }
-    
+
     /// Generate a test attestation
     pub fn generate_test_attestation() -> (Vec<u8>, u64, u64, (u64, u64, u64)) {
         // For testing purposes, we use a fixed attestation
@@ -68,31 +68,27 @@ pub mod utils {
         let amount = 1_000_000; // 0.01 BTC in satoshis
         let deposit_nonce = 42;
         let signature = generate_test_signature();
-        
+
         (recipient_pk_hash, amount, deposit_nonce, signature)
     }
-    
+
     /// Verify a proof and return the result
-    pub fn verify_proof(
-        proof: &SerializableProof,
-        circuit_type: &str,
-    ) -> WireResult<()> {
+    pub fn verify_proof(proof: &SerializableProof, circuit_type: &str) -> WireResult<()> {
         match circuit_type {
             "wrapped-mint" => {
                 wire_lib::circuits::wrapped_asset_mint::WrappedAssetMintCircuit::verify_proof(proof)
-            },
+            }
             "wrapped-burn" => {
                 wire_lib::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit::verify_proof(proof)
-            },
-            "transfer" => {
-                wire_lib::circuits::transfer::TransferCircuit::verify_proof(proof)
-            },
-            _ => Err(wire_lib::errors::WireError::InvalidCircuitType(
-                format!("Unknown circuit type: {}", circuit_type),
-            )),
+            }
+            "transfer" => wire_lib::circuits::transfer::TransferCircuit::verify_proof(proof),
+            _ => Err(wire_lib::errors::WireError::InvalidCircuitType(format!(
+                "Unknown circuit type: {}",
+                circuit_type
+            ))),
         }
     }
-    
+
     /// Measure execution time of a function
     pub fn measure_time<F, T>(f: F) -> (T, std::time::Duration)
     where
@@ -101,10 +97,10 @@ pub mod utils {
         let start = std::time::Instant::now();
         let result = f();
         let duration = start.elapsed();
-        
+
         (result, duration)
     }
-    
+
     /// Measure memory usage of a function
     pub fn measure_memory<F, T>(f: F) -> (T, usize)
     where
@@ -114,7 +110,7 @@ pub mod utils {
         // In a real implementation, this would use platform-specific APIs
         // or a memory profiling library
         let result = f();
-        
+
         // Return a placeholder memory usage
         (result, 0)
     }

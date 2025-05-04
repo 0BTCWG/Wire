@@ -1,7 +1,7 @@
 // Hash utility functions for the 0BTC Wire system
 
-use plonky2::hash::hash_types::RichField;
 use plonky2::field::extension::Extendable;
+use plonky2::hash::hash_types::RichField;
 use plonky2::hash::poseidon::PoseidonHash;
 use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
@@ -17,7 +17,7 @@ pub fn poseidon_hash_with_domain<F: RichField>(inputs: &[F], domain: u64) -> F {
     let mut domain_inputs = Vec::with_capacity(inputs.len() + 1);
     domain_inputs.push(F::from_canonical_u64(domain));
     domain_inputs.extend_from_slice(inputs);
-    
+
     PoseidonHash::hash_or_noop(&domain_inputs).elements[0]
 }
 
@@ -56,11 +56,11 @@ pub fn poseidon_hash_with_domain_targets<F: RichField + Extendable<D>, const D: 
 ) -> Target {
     // Add domain separation
     let domain_const = builder.constant(F::from_canonical_u64(domain));
-    
+
     // Prepend domain to inputs
     let mut domain_inputs = vec![domain_const];
     domain_inputs.extend_from_slice(inputs);
-    
+
     // Use our compute_hash_targets function instead of hash_n_to_hash_no_pad
     compute_hash_targets(builder, &domain_inputs)
 }
@@ -105,24 +105,24 @@ pub fn compute_hash_targets<F: RichField + Extendable<D>, const D: usize>(
 ) -> Target {
     // Create the initial state
     let mut state = [builder.zero(); 4];
-    
+
     // Process inputs in chunks of 3
     for chunk in inputs.chunks(3) {
         // Add inputs to state
         for (i, &input) in chunk.iter().enumerate() {
             state[i + 1] = input;
         }
-        
+
         // Apply Poseidon permutation
         state = apply_poseidon_permutation(builder, state);
     }
-    
+
     // Combine state elements into final hash
     let mut result = state[0];
     for _i in 1..4 {
         result = builder.add(result, state[_i]);
     }
-    
+
     result
 }
 
@@ -141,7 +141,7 @@ pub fn hash_for_signature<F: RichField + Extendable<D>, const D: usize>(
     let mut inputs = Vec::new();
     inputs.extend_from_slice(message);
     inputs.extend_from_slice(public_key);
-    
+
     Ok(compute_hash_targets(builder, &inputs))
 }
 
@@ -154,12 +154,7 @@ pub fn hash<F: RichField + Extendable<D>, const D: usize>(
 }
 
 /// Compute a nullifier hash for a UTXO
-pub fn compute_nullifier<F: RichField>(
-    owner_pubkey_hash: F,
-    asset_id: F,
-    amount: F,
-    salt: F,
-) -> F {
+pub fn compute_nullifier<F: RichField>(owner_pubkey_hash: F, asset_id: F, amount: F, salt: F) -> F {
     let utxo_hash = poseidon_hash_four(owner_pubkey_hash, asset_id, amount, salt);
     poseidon_hash_with_domain(&[utxo_hash], domains::NULLIFIER)
 }
@@ -173,7 +168,8 @@ pub fn compute_nullifier_targets<F: RichField + Extendable<D>, const D: usize>(
     salt: Target,
 ) -> Target {
     let utxo_hash = poseidon_hash_four_targets(builder, owner_pubkey_hash, asset_id, amount, salt);
-    poseidon_hash_with_domain_targets(builder, &[utxo_hash], domains::NULLIFIER) // Domain 0x01 for nullifiers
+    poseidon_hash_with_domain_targets(builder, &[utxo_hash], domains::NULLIFIER)
+    // Domain 0x01 for nullifiers
 }
 
 /// Compute a UTXO commitment hash
@@ -212,7 +208,7 @@ pub fn compute_asset_id<F: RichField>(
     inputs.push(decimals);
     inputs.push(max_supply);
     inputs.push(is_mintable);
-    
+
     poseidon_hash_with_domain(&inputs, domains::ASSET_ID)
 }
 
@@ -228,7 +224,7 @@ pub fn compute_asset_id_targets<F: RichField + Extendable<D>, const D: usize>(
     inputs.extend_from_slice(asset_name);
     inputs.extend_from_slice(asset_symbol);
     inputs.push(asset_decimals);
-    
+
     poseidon_hash_with_domain_targets(builder, &inputs, domains::ASSET_ID)
 }
 
@@ -271,7 +267,7 @@ pub fn poseidon_hash_empty_target<F: RichField + Extendable<D>, const D: usize>(
 ) -> Target {
     // Create a constant zero target
     let zero = builder.zero();
-    
+
     // Hash a single zero element
     poseidon_hash_targets(builder, &[zero])
 }
@@ -295,19 +291,19 @@ pub fn apply_poseidon_permutation<F: RichField + Extendable<D>, const D: usize>(
 /// Applies the Poseidon permutation to a state in the circuit
 pub fn apply_poseidon_permutation_targets<F: RichField + Extendable<D>, const D: usize>(
     builder: &mut CircuitBuilder<F, D>,
-    state: [Target; 4]
+    state: [Target; 4],
 ) -> [Target; 4] {
     // This is a simplified implementation
     // In a real implementation, we would apply the full Poseidon permutation
-    
+
     // For now, just mix the state elements
     let temp = builder.add(state[0], state[1]);
-    
+
     [
         builder.add(state[0], temp),
         builder.mul(state[0], state[1]),
         builder.mul(state[1], state[2]),
-        builder.mul(state[2], state[3])
+        builder.mul(state[2], state[3]),
     ]
 }
 
@@ -318,4 +314,17 @@ pub mod domains {
     pub const MERKLE_TREE: u64 = 0x03;
     pub const ASSET_ID: u64 = 0x04;
     pub const FEE: u64 = 0x05;
+
+    // Circuit-specific nullifier domains to prevent cross-circuit attacks
+    pub mod nullifiers {
+        pub const TRANSFER: u64 = 0x0101;
+        pub const SWAP: u64 = 0x0102;
+        pub const ADD_LIQUIDITY: u64 = 0x0103;
+        pub const REMOVE_LIQUIDITY: u64 = 0x0104;
+        pub const WRAPPED_ASSET_BURN: u64 = 0x0105;
+        pub const NATIVE_ASSET_BURN: u64 = 0x0106;
+        pub const LN_BURN: u64 = 0x0107;
+        pub const STABLECOIN_MINT: u64 = 0x0108;
+        pub const STABLECOIN_REDEEM: u64 = 0x0109;
+    }
 }
