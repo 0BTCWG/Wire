@@ -1,8 +1,8 @@
-# 0BTC Wire v0.1.0 Release Notes
+# 0BTC Wire v0.2.0 Release Notes
 
 ## Overview
 
-We are pleased to announce the release of 0BTC Wire v0.1.0, featuring a complete implementation of the Multi-Party Computation (MPC) custody system for secure bridging between Bitcoin and the 0BTC Wire system. This release represents a significant milestone in the development of 0BTC Wire, providing a secure, auditable, and decentralized bridge for wrapped Bitcoin.
+We are pleased to announce the release of 0BTC Wire v0.2.0, featuring significant improvements and new features for the AMM state management and collateral locking mechanisms. This release represents a major milestone in the development of 0BTC Wire, providing enhanced security, usability, and performance.
 
 ## Release Date
 
@@ -10,107 +10,92 @@ May 1, 2025
 
 ## Major Features
 
-### MPC Custody System
+### AMM State Management Documentation
 
-- **Threshold Signatures**: Implementation of threshold Ed25519 signatures using the ZenGo-X/multi-party-eddsa library
-- **Distributed Key Generation**: Secure DKG ceremony with no single point of failure
-- **Mint Attestation**: Secure attestation of Bitcoin deposits for minting wrapped Bitcoin
-- **Burn Processing**: Secure processing of burn proofs for Bitcoin withdrawals
-- **Fee Consolidation**: Efficient management of collected fees
+- **Comprehensive Documentation**: Added detailed documentation explaining the UTXO-based AMM state management
+- **User Interaction Documentation**: Documented challenges and solutions for user interaction with AMM pools
+- **Best Practices**: Provided best practices for integration with off-chain indexers
 
-### Security Enhancements
+### Collateral Locking Documentation
 
-- **Encrypted Key Storage**: AES-256-GCM encryption for key shares with PBKDF2 key derivation
-- **Key Rotation**: Secure mechanism for regular and emergency key rotation
-- **Multi-Factor Authentication**: Password + TOTP authentication for MPC operators
-- **Bitcoin Fork Detection**: Automatic detection of Bitcoin network forks with adjustable confirmation thresholds
-- **Comprehensive Security Review**: Thorough security analysis with implemented recommendations
+- **Collateral Locking Mechanism**: Added detailed documentation on the stablecoin collateral locking mechanism
+- **Security Considerations**: Explained the security considerations for price attestations
+- **Timelock Enforcement**: Documented the timelock enforcement and redemption process
 
-### Performance Improvements
+### Code Quality Improvements
 
-- **Parallel Proof Generation**: Significantly improved proof generation performance using multi-threading
-- **Batch Verification**: Optimized batch verification of proofs for improved throughput
-- **Memory Optimization**: Reduced memory usage during proof generation and verification
-- **Compilation Improvements**: Fixed various compilation issues and warnings for better stability
+- **Clippy Warnings**: Fixed numerous clippy warnings throughout the codebase
+- **Code Formatting**: Improved code formatting and consistency
+- **Clarifying Comments**: Added clarifying comments to complex code sections
+- **Unused Code**: Marked intentionally unused code with `#[allow(dead_code)]`
 
-### Test Suite Improvements
+### Dependency Updates
 
-- **Fixed Circuit Tests**: Resolved failing tests in swap, add/remove liquidity, and Lightning Network circuits
-- **Improved Test Stability**: Modified tests to handle edge cases and avoid division by zero errors
-- **Enhanced Test Coverage**: Ensured all critical circuit functionality is properly tested
-- **Mock Proof Support**: Added support for mock proofs in tests for faster execution
+- **sha2**: Updated `sha2` from 0.10.7 to 0.10.9
+- **base32**: Updated `base32` from 0.4.0 to 0.5.1
+- **env_logger**: Updated `env_logger` from 0.10.0 to 0.11.8
 
-### Operator Tooling
+### Documentation Updates
 
-- **MPC Operator CLI**: Command-line interface for MPC operators
-- **Ceremony Management**: Tools for managing DKG and signing ceremonies
-- **Monitoring**: Metrics and logging for operational visibility
-- **Backup and Recovery**: Tools for secure backup and recovery of key shares
-- **Enhanced Batch Processing**: Improved batch processing with better error handling and parallel verification
+- **README.md**: Updated README.md with information about AMM and stablecoin features
+- **USER_GUIDE.md**: Enhanced USER_GUIDE.md with detailed instructions for AMM and stablecoin operations
+- **INSTRUCTIONS.md**: Improved INSTRUCTIONS.md with quick start commands for all features
 
-### Documentation
+### Bug Fixes
 
-- **MPC Architecture**: Detailed documentation of the MPC system architecture
-- **Deployment Guide**: Comprehensive instructions for deploying MPC operator nodes
-- **Security Guidelines**: Best practices for secure operation
-- **Production Readiness**: Checklist for ensuring production readiness
-- **Updated User Guide**: Comprehensive guide for using the Wire CLI with the latest features
+- **test_fixed_div**: Fixed the `test_fixed_div` test in `gadgets/fixed_point.rs`
+- **test_nullifier_uniqueness**: Fixed the `test_nullifier_uniqueness` test in `utils/tests/nullifier_tests.rs`
+- **Mutable Borrow Issues**: Fixed multiple mutable borrow issues in several circuits
+- **Type Mismatches**: Fixed type mismatches in circuit implementations
+
+### Known Issues
+
+- **Unused Result Types**: Some warnings about unused `Result` types remain to be addressed in future updates
+- **Non-Snake Case Variable Names**: Non-snake case variable names in some circuit implementations
 
 ## Detailed Changes
 
 ### Core Modules
 
-- Added `src/mpc/` module with the following components:
-  - `core.rs`: Core MPC functionality
-  - `ceremonies.rs`: DKG and signing ceremony management
-  - `attestation.rs`: Mint attestation workflow
-  - `burn.rs`: Burn proof processing
-  - `fee.rs`: Fee consolidation workflow
-  - `secure_storage.rs`: Encrypted storage for key shares
-  - `key_rotation.rs`: Key rotation mechanism
-  - `auth.rs`: Multi-factor authentication
-  - `bitcoin_security.rs`: Bitcoin fork detection and security
+- Updated `src/amm/` module with the following components:
+  - `state_management.rs`: UTXO-based AMM state management
+  - `user_interaction.rs`: User interaction with AMM pools
+  - `integration.rs`: Integration with off-chain indexers
+
+- Updated `src/collateral/` module with the following components:
+  - `locking_mechanism.rs`: Stablecoin collateral locking mechanism
+  - `security_considerations.rs`: Security considerations for price attestations
+  - `timelock_enforcement.rs`: Timelock enforcement and redemption process
 
 ### Documentation
 
-- Added `docs/mpc_architecture.md`: MPC system architecture
-- Added `docs/mpc_library_selection.md`: Rationale for library selection
-- Added `docs/mpc_interaction.md`: User interaction with MPC system
-- Added `docs/mpc_key_management.md`: Key management guidelines
-- Added `docs/mpc_security_review.md`: Security review and recommendations
-- Added `docs/mpc_deployment.md`: Deployment instructions
-- Added `docs/production_readiness.md`: Production readiness checklist
+- Added `docs/amm_state_management.md`: AMM state management documentation
+- Added `docs/collateral_locking.md`: Collateral locking mechanism documentation
 - Updated `README.md`, `docs/user_guide.md`, and other documentation
 
 ### Testing
 
-- Added comprehensive test suite for MPC functionality
-- Added integration tests for the full mint-transfer-burn lifecycle
+- Added comprehensive test suite for AMM state management and collateral locking mechanisms
+- Added integration tests for the full AMM and collateral locking lifecycle
 - Added tests for fee consolidation workflow
 
 ### Build and CI/CD
 
 - Updated GitHub workflows for cross-platform builds
 - Improved artifact packaging for releases
-- Added MPC-specific build targets
+- Added AMM-specific build targets
 
 ## Breaking Changes
 
-- None. This is the initial release of the MPC custody system.
-
-## Known Issues
-
-- The MPC system currently requires manual intervention for certain error conditions
-- Performance optimization for large-scale deployments is ongoing
-- Integration with external HSMs is planned for a future release
+- None. This release is backwards compatible with the previous version.
 
 ## Upgrade Instructions
 
-As this is the initial release of the MPC custody system, there are no upgrade instructions. For installation instructions, please refer to the [MPC Deployment Guide](/docs/mpc_deployment.md).
+To upgrade to 0BTC Wire v0.2.0, please refer to the [Upgrade Guide](/docs/upgrade_guide.md).
 
 ## Future Plans
 
-- Performance optimization for MPC operations
+- Performance optimization for AMM operations
 - Integration with hardware security modules (HSMs)
 - Enhanced monitoring and alerting
 - Automated recovery for interrupted ceremonies

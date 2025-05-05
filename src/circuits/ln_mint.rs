@@ -75,7 +75,7 @@ impl LNMintCircuit {
         builder.range_check(time_diff, 32);
 
         // Compare time_diff < time_window
-        let time_window_target = builder.constant(self.time_window as u64);
+        let time_window_target = builder.constant(F::from_canonical_u64(self.time_window));
 
         // Create a comparison circuit for less than using a simpler approach
         let diff = builder.sub(time_window_target, time_diff);

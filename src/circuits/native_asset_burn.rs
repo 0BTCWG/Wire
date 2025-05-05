@@ -71,8 +71,7 @@ impl NativeAssetBurnCircuit {
         let input_utxo_commitment = hash_utxo_commitment(builder, &converted_utxo);
 
         // Create a message to sign (the UTXO commitment)
-        let mut message = Vec::new();
-        message.push(input_utxo_commitment);
+        let message = vec![input_utxo_commitment];
 
         // Use our improved signature verification with domain separation
         let is_valid = verify_message_signature(builder, &message, &self.signature, &self.owner_pk);
@@ -83,7 +82,8 @@ impl NativeAssetBurnCircuit {
 
         // Convert is_valid to BoolTarget
         let is_valid_bool = builder.add_virtual_bool_target_safe();
-        builder.connect(is_valid, bool_to_target(builder, is_valid_bool));
+        let is_valid_target = bool_to_target(builder, is_valid_bool);
+        builder.connect(is_valid, is_valid_target);
         let is_valid_selected = builder.select(is_valid_bool, one, zero);
         builder.assert_one(is_valid_selected);
 

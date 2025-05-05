@@ -19,6 +19,8 @@
    - [Burning Wrapped BTC](#burning-wrapped-btc)
    - [Transferring Assets](#transferring-assets)
    - [Creating Native Assets](#creating-native-assets)
+   - [Using AMM Features](#using-amm-features)
+   - [Stablecoin Operations](#stablecoin-operations)
 6. [Advanced Features](#advanced-features)
    - [Configuration](#configuration)
    - [Batch Processing](#batch-processing)
@@ -210,14 +212,96 @@ The `transfer_params.json` file should include:
 To create a new native asset:
 
 ```bash
-# Generate a native asset creation proof
-wire prove --circuit native_asset_create --input asset_params.json --output asset_proof.json
+wire prove --circuit native_asset_create --input create_params.json --output create_proof.json
 ```
 
-The `asset_params.json` file should include:
-- Creator public key
-- Asset parameters (decimals, max supply, etc.)
+The `create_params.json` file should include:
+- Creator's public key
+- Asset details (name, symbol, initial supply)
 - Fee information
+
+### Using AMM Features
+
+Wire includes a powerful Automated Market Maker (AMM) system that allows users to create liquidity pools, add/remove liquidity, and swap tokens.
+
+#### Adding Liquidity
+
+To add liquidity to a pool:
+
+```bash
+wire prove --circuit add_liquidity --input add_liquidity_params.json --output add_liquidity_proof.json
+```
+
+The `add_liquidity_params.json` file should include:
+- Input UTXOs for both tokens
+- Pool information
+- Minimum LP tokens to receive
+- User signature
+
+#### Removing Liquidity
+
+To remove liquidity from a pool:
+
+```bash
+wire prove --circuit remove_liquidity --input remove_liquidity_params.json --output remove_liquidity_proof.json
+```
+
+The `remove_liquidity_params.json` file should include:
+- LP token UTXO
+- Pool information
+- Minimum token amounts to receive
+- User signature
+
+#### Swapping Tokens
+
+To swap tokens using an AMM pool:
+
+```bash
+wire prove --circuit swap --input swap_params.json --output swap_proof.json
+```
+
+The `swap_params.json` file should include:
+- Input UTXO for the token to swap
+- Pool information
+- Minimum output amount
+- User signature
+
+For more details on AMM state management, see the [AMM State Management](./docs/amm_state_management.md) documentation.
+
+### Stablecoin Operations
+
+Wire supports a fully collateralized stablecoin system that allows users to mint stablecoins backed by wrapped Bitcoin.
+
+#### Minting Stablecoins
+
+To mint stablecoins:
+
+```bash
+wire prove --circuit stablecoin_mint --input mint_params.json --output mint_proof.json
+```
+
+The `mint_params.json` file should include:
+- Input UTXO containing wBTC collateral
+- Stablecoin amount to mint
+- Price attestation from MPC committee
+- Overcollateralization ratio (minimum 150%)
+- User signature
+
+#### Redeeming Stablecoins
+
+To redeem stablecoins for the underlying collateral:
+
+```bash
+wire prove --circuit stablecoin_redeem --input redeem_params.json --output redeem_proof.json
+```
+
+The `redeem_params.json` file should include:
+- Input UTXO containing stablecoins
+- Collateral UTXO information
+- Price attestation from MPC committee
+- User signature
+
+For more details on the collateral locking mechanism, see the [Collateral Locking](./docs/collateral_locking.md) documentation.
 
 ## Advanced Features
 

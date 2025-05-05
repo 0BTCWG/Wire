@@ -37,19 +37,19 @@ This task list outlines key areas for review, hardening, and implementation base
 
 **III. MPC System:**
 
-*   **[ ] Secure Key Share Storage:**
+*   **[✓] Secure Key Share Storage:**
     *   **Task:** Review `src/mpc/secure_storage.rs`. Ensure key shares are encrypted at rest using strong, standard algorithms (e.g., AES-GCM) and proper key derivation (e.g., PBKDF2).
     *   **Action:** Harden implementation if necessary. Document backup and recovery procedures clearly for operators.
-*   **[ ] Verify Ceremony Robustness:**
+*   **[✓] Verify Ceremony Robustness:**
     *   **Task:** Review DKG and signing ceremony logic in `src/mpc/ceremonies.rs`.
     *   **Action:** Add checks for participant timeouts, invalid messages, and potential adversarial behavior. Implement recovery mechanisms for failed ceremonies.
-*   **[ ] Add MPC Audit Logging:**
+*   **[✓] Add MPC Audit Logging:**
     *   **Task:** Implement comprehensive, secure logging for all critical MPC actions (ceremony participation, key generation, signing, attestation generation, withdrawals).
     *   **Action:** Add logging points in `src/mpc/` modules. Ensure logs don't contain sensitive data.
-*   **[ ] Review Communication Security:**
+*   **[✓] Review Communication Security:**
     *   **Task:** Verify the TLS implementation for node communication (`src/mpc/communication.rs`).
     *   **Action:** Ensure certificate validation is strict. Implement replay protection (e.g., nonces, timestamps) and potentially rate limiting on the MPC API endpoints.
-*   **[ ] Harden Attestation/Withdrawal Logic:**
+*   **[✓] Harden Attestation/Withdrawal Logic:**
     *   **Task:** Review MPC logic for LN bridge (`src/mpc/lightning.rs`), Stablecoin oracle/redemption (`src/mpc/stablecoin.rs`), and BTC bridging (`src/mpc/attestation.rs`, `src/mpc/burn.rs`).
     *   **Action:** Ensure external data (LN payments, prices, BTC blocks) is validated. Implement robust nonce/ID checks for attestations to prevent replays. Verify signature generation logic. Add thorough error handling.
 
@@ -79,20 +79,20 @@ This task list outlines key areas for review, hardening, and implementation base
 *   **[✓] Improve Input Validation:**
     *   **Task:** Review validation logic in `src/cli/validation.rs` and `src/wasm/validation.rs`.
     *   **Action:** Ensure all user inputs (CLI args, WASM params, API inputs) are strictly validated. Add missing checks, tighten existing ones (e.g., length limits, format checks).
-*   **[ ] Code Cleanup:**
+*   **[✓] Code Cleanup:**
     *   **Task:** Remove dead code, add clarifying comments, ensure consistent formatting (`cargo fmt`), and address clippy warnings (`cargo clippy`).
     *   **Action:** Run linters, formatters, and manually review code for clarity and maintainability.
-*   **[ ] Update Dependencies:**
+*   **[✓] Update Dependencies:**
     *   **Task:** Check for updates to dependencies, especially cryptographic libraries (Plonky2, ed25519-dalek) and apply security patches.
     *   **Action:** Run `cargo update`, test thoroughly after updates.
 
 **VI. Documentation:**
 
-*   **[ ] Document AMM State Management:**
+*   **[✓] Document AMM State Management:**
     *   **Task:** Update relevant documentation (`docs/`) to explain the `PoolStateUTXO` mechanism and the challenges/solutions for user interaction (e.g., needing off-chain indexers).
-*   **[ ] Document Collateral Locking:**
+*   **[✓] Document Collateral Locking:**
     *   **Task:** Clearly document the chosen mechanism for locking stablecoin collateral in `docs/` and ensure it aligns with the circuit implementation.
-*   **[ ] Final Documentation Review:**
+*   **[✓] Final Documentation Review:**
     *   **Task:** Ensure all guides (`USER_GUIDE.md`, `installation_guide.md`, etc.) and technical docs (`mpc_*.md`, `api_reference.md`) are accurate and reflect the final implementation.
 
 ---

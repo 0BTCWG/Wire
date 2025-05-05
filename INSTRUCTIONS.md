@@ -51,52 +51,65 @@ This document provides quick installation and usage instructions for the 0BTC Wi
    cargo install --path .
    ```
 
-## Quick Start
+## Quick Start Commands
 
-### Generate a Keypair
-
-Generate a new keypair with a BIP-39 mnemonic phrase:
+### Basic Operations
 
 ```bash
-wire keygen --output my_keys.json
+# Generate a new wallet
+wire wallet generate
+
+# View wallet information
+wire wallet info
+
+# Import an existing wallet from mnemonic
+wire wallet import
 ```
 
-### Prove a Circuit
-
-Generate a proof for a circuit:
+### Asset Operations
 
 ```bash
+# Mint wrapped BTC
+wire prove --circuit wrapped_asset_mint --input mint_params.json --output mint_proof.json
+
+# Transfer assets
 wire prove --circuit transfer --input transfer_params.json --output transfer_proof.json
+
+# Burn wrapped BTC
+wire prove --circuit wrapped_asset_burn --input burn_params.json --output burn_proof.json
+
+# Create a native asset
+wire prove --circuit native_asset_create --input create_params.json --output create_proof.json
 ```
 
-For improved performance, use parallel processing:
+### AMM Operations
 
 ```bash
-wire prove --circuit transfer --input transfer_params.json --output transfer_proof.json --parallel
+# Add liquidity to a pool
+wire prove --circuit add_liquidity --input add_liquidity_params.json --output add_liquidity_proof.json
+
+# Remove liquidity from a pool
+wire prove --circuit remove_liquidity --input remove_liquidity_params.json --output remove_liquidity_proof.json
+
+# Swap tokens using an AMM pool
+wire prove --circuit swap --input swap_params.json --output swap_proof.json
 ```
 
-### Verify a Proof
-
-Verify a proof:
+### Stablecoin Operations
 
 ```bash
+# Mint stablecoins
+wire prove --circuit stablecoin_mint --input mint_params.json --output mint_proof.json
+
+# Redeem stablecoins
+wire prove --circuit stablecoin_redeem --input redeem_params.json --output redeem_proof.json
+```
+
+### Verification
+
+```bash
+# Verify a proof
 wire verify --circuit transfer --proof transfer_proof.json
-```
-
-### Aggregate Proofs
-
-Aggregate multiple proofs:
-
-```bash
-wire aggregate --input-dir proofs/ --output aggregated_proof.json
-```
-
-### Batch Processing
-
-Process a batch of proofs:
-
-```bash
-wire batch --config batch_config.json --input-dir proofs/ --output-dir verified_proofs/
 ```
 
 ## Command Reference
@@ -160,11 +173,25 @@ If you encounter any issues:
 
 ## Documentation
 
-For more detailed instructions, refer to the following documentation:
+For more detailed information, refer to the following documentation:
 
-- [USER_GUIDE.md](USER_GUIDE.md): Comprehensive user guide
-- [docs/mpc_interaction.md](docs/mpc_interaction.md): MPC custody and interaction flows
-- [docs/mpc_key_management.md](docs/mpc_key_management.md): MPC key management procedures
+- [USER_GUIDE.md](./USER_GUIDE.md) - Comprehensive user guide
+- [docs/amm_state_management.md](./docs/amm_state_management.md) - AMM state management details
+- [docs/collateral_locking.md](./docs/collateral_locking.md) - Stablecoin collateral mechanism
+- [docs/api_reference.md](./docs/api_reference.md) - API reference
+- [docs/integration_guide.md](./docs/integration_guide.md) - Integration guide
+
+## Getting Help
+
+```bash
+# Show help information
+wire --help
+
+# Show help for a specific command
+wire wallet --help
+wire prove --help
+wire verify --help
+```
 
 ## Support
 

@@ -22,6 +22,15 @@ The system uses Plonky2, a PLONK-based ZK proving system with recursive verifica
   - `NativeAssetMintCircuit`: Mint additional tokens for existing assets
   - `NativeAssetBurnCircuit`: Burn native asset tokens
 
+- **Group IV: AMM Circuits**
+  - `AddLiquidityCircuit`: Add liquidity to AMM pools
+  - `RemoveLiquidityCircuit`: Remove liquidity from AMM pools
+  - `SwapCircuit`: Swap tokens using AMM pools
+
+- **Group V: Stablecoin Circuits**
+  - `StablecoinMintCircuit`: Mint stablecoins backed by collateral
+  - `StablecoinRedeemCircuit`: Redeem stablecoins for collateral
+
 - **Security Features**
   - Domain-separated hash functions for all operations
   - Secure EdDSA signature verification
@@ -77,13 +86,16 @@ cargo run --release --bin generate_audit_test_vectors -- --output-dir ./test_vec
 
 ## Documentation
 
-Comprehensive documentation is available in the `docs` directory:
+Comprehensive documentation is available in the `docs/` directory:
 
-- [Installation Guide](docs/installation_guide.md) - Detailed installation instructions
-- [API Reference](docs/api_reference.md) - Reference for all public APIs
-- [Integration Guide](docs/integration_guide.md) - Guide for integrating with other systems
-- [Security Model](docs/security_model.md) - Overview of the security model
-- [Audit Test Vectors](docs/AUDIT_TEST_VECTORS.md) - Guide for generating and using audit test vectors
+- **AMM State Management**: Learn how the Wire protocol manages AMM pool states using UTXOs
+- **Collateral Locking**: Understand the mechanism for locking and redeeming stablecoin collateral
+- **MPC Architecture**: Details on the multi-party computation system for secure operations
+- **Security Model**: Overview of the security guarantees provided by the system
+- **API Reference**: Complete reference for all API endpoints and functions
+- **Integration Guide**: Instructions for integrating Wire into your applications
+
+See the [USER_GUIDE.md](./USER_GUIDE.md) for detailed usage instructions and the [INSTRUCTIONS.md](./INSTRUCTIONS.md) for quick setup.
 
 ## Architecture
 

@@ -165,7 +165,7 @@ pub fn generate_ln_burn_proof(
     info!("Generating burn proof for Lightning Network withdrawal");
 
     // Extract UTXO values
-    let commitment = hex::decode(utxo["commitment"].as_str().unwrap_or(""))
+    let _commitment = hex::decode(utxo["commitment"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid commitment: {}", e))?;
     let _nullifier = hex::decode(utxo["nullifier"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid nullifier: {}", e))?;
