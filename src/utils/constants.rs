@@ -1,5 +1,4 @@
 // Constants for the Virtual CPMM system
-use plonky2::field::types::Field;
 
 /// Scaling factor for fixed-point arithmetic (6 decimal places)
 pub const SCALING_FACTOR: u64 = 1_000_000;

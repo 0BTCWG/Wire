@@ -188,40 +188,40 @@ impl WrappedAssetMintCircuit {
         };
 
         // Set the witness values
-        pw.set_target(
+        let _ = pw.set_target(
             custodian_pk.point.x,
             GoldilocksField::from_canonical_u64(custodian_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             custodian_pk.point.y,
             GoldilocksField::from_canonical_u64(custodian_pk_y),
         );
 
-        for i in 0..recipient_pk_hash.len().min(HASH_SIZE) {
-            pw.set_target(
+        for i in 0..recipient_pk_hash.len() {
+            let _ = pw.set_target(
                 attestation.recipient_pk_hash[i],
                 GoldilocksField::from_canonical_u64(recipient_pk_hash[i] as u64),
             );
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             attestation.amount,
             GoldilocksField::from_canonical_u64(amount),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             attestation.deposit_nonce,
             GoldilocksField::from_canonical_u64(deposit_nonce),
         );
 
-        pw.set_target(
+        let _ = pw.set_target(
             signature.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );

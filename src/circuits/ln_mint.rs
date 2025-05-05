@@ -3,19 +3,17 @@ use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData, VerifierOnlyCircuitData};
+use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
-use plonky2::plonk::proof::ProofWithPublicInputs;
 
-use crate::core::proof::{deserialize_proof, serialize_proof, SerializableProof};
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, F, HASH_SIZE, WBTC_ASSET_ID};
-use crate::errors::{ProofError, WireError, WireResult};
+use crate::core::proof::{deserialize_proof, SerializableProof};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, F, HASH_SIZE};
+use crate::errors::{WireError, WireResult};
 use crate::gadgets::verify_message_signature;
 use crate::utils::hash::compute_hash_targets;
-use rand::Rng;
 
 /// Represents a signed Lightning Network payment attestation from MPC operators
 #[derive(Clone)]
@@ -74,10 +72,10 @@ impl LNMintCircuit {
 
         // Verify the timestamp is recent
         let time_diff = builder.sub(self.current_timestamp, self.attestation.timestamp);
-        let _is_recent = builder.range_check(time_diff, 32);
+        builder.range_check(time_diff, 32);
 
         // Compare time_diff < time_window
-        let time_window_target = builder.constant(F::from_canonical_u64(self.time_window as u64));
+        let time_window_target = builder.constant(self.time_window as u64);
 
         // Create a comparison circuit for less than using a simpler approach
         let diff = builder.sub(time_window_target, time_diff);
@@ -303,7 +301,7 @@ impl LNMintCircuit {
                 signature,
             },
             current_timestamp: current_timestamp_target,
-            time_window: time_window, // 5 minutes in seconds
+            time_window,
         };
 
         // Generate the proof

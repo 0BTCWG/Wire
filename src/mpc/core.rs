@@ -5,7 +5,6 @@
 
 use crate::mpc::{MPCConfig, MPCError, MPCResult};
 use ed25519_dalek::{Signature as Ed25519Signature, VerifyingKey as Ed25519PublicKey};
-use rand::thread_rng;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
 use std::fs;

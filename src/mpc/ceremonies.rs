@@ -52,13 +52,13 @@ pub struct DKGCeremony {
     status: CeremonyStatus,
 
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Number of parties in the ceremony
     parties: usize,
 
     /// Threshold for signatures
-    threshold: usize,
+    _threshold: usize,
 
     /// Commitments received from other parties
     commitments: HashMap<usize, Vec<u8>>,
@@ -79,9 +79,9 @@ impl DKGCeremony {
         Self {
             id: Uuid::new_v4().to_string(),
             status: CeremonyStatus::Created,
-            mpc_core,
+            _mpc_core: mpc_core,
             parties,
-            threshold,
+            _threshold: threshold,
             commitments: HashMap::new(),
             shares: HashMap::new(),
             key_share: None,
@@ -245,10 +245,10 @@ pub struct SigningCeremony {
     status: CeremonyStatus,
 
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Message to sign
-    message: Vec<u8>,
+    _message: Vec<u8>,
 
     /// Number of parties in the ceremony
     parties: usize,
@@ -269,8 +269,8 @@ impl SigningCeremony {
         Self {
             id: Uuid::new_v4().to_string(),
             status: CeremonyStatus::Created,
-            mpc_core,
-            message,
+            _mpc_core: mpc_core,
+            _message: message,
             parties,
             threshold,
             signature_shares: HashMap::new(),

@@ -1,15 +1,14 @@
 // Lightning Network MPC module for the 0BTC Wire system
-use log::{error, info, warn};
+use log::info;
 use serde::{Deserialize, Serialize};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::proof::SerializableProof;
 use crate::errors::WireError;
 use crate::mpc::core::MPCCore;
-use crate::mpc::{MPCConfig, MPCError, MPCResult};
+use crate::mpc::{MPCConfig, MPCError};
 
 /// Type alias for Lightning MPC results
 pub type LNResult<T> = Result<T, WireError>;
@@ -143,7 +142,7 @@ impl LightningManager {
     pub fn new(mpc_core: MPCCore, db_path: String) -> LNResult<Self> {
         // Create the database directory if it doesn't exist
         if !Path::new(&db_path).exists() {
-            fs::create_dir_all(&db_path).map_err(|e| {
+            std::fs::create_dir_all(&db_path).map_err(|e| {
                 WireError::GenericError(format!("Failed to create database directory: {}", e))
             })?;
         }
@@ -169,7 +168,7 @@ impl LightningManager {
 
         // Load payments
         if Path::new(&payments_path).exists() {
-            let payments_data = fs::read_to_string(&payments_path).map_err(|e| {
+            let payments_data = std::fs::read_to_string(&payments_path).map_err(|e| {
                 WireError::GenericError(format!("Failed to read payments data: {}", e))
             })?;
 
@@ -189,7 +188,7 @@ impl LightningManager {
 
         // Load burn requests
         if Path::new(&burn_requests_path).exists() {
-            let burn_data = fs::read_to_string(&burn_requests_path).map_err(|e| {
+            let burn_data = std::fs::read_to_string(&burn_requests_path).map_err(|e| {
                 WireError::GenericError(format!("Failed to read burn requests data: {}", e))
             })?;
 
@@ -216,7 +215,7 @@ impl LightningManager {
         let payments_data = serde_json::to_string_pretty(&all_payments)
             .map_err(|e| WireError::GenericError(format!("Failed to serialize payments: {}", e)))?;
 
-        fs::write(&payments_path, payments_data).map_err(|e| {
+        std::fs::write(&payments_path, payments_data).map_err(|e| {
             WireError::GenericError(format!("Failed to write payments data: {}", e))
         })?;
 
@@ -226,7 +225,7 @@ impl LightningManager {
                 WireError::GenericError(format!("Failed to serialize burn requests: {}", e))
             })?;
 
-        fs::write(&burn_requests_path, burn_data).map_err(|e| {
+        std::fs::write(&burn_requests_path, burn_data).map_err(|e| {
             WireError::GenericError(format!("Failed to write burn requests data: {}", e))
         })?;
 
@@ -510,10 +509,8 @@ impl LNBurnMPC {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::proof::SerializableProof;
+    use crate::mpc::core::MPCCore;
     use crate::mpc::MPCConfig;
-    use std::fs;
-    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]

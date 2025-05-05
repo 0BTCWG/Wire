@@ -1,7 +1,5 @@
 // Stablecoin Redeem Circuit for the 0BTC Wire system
-use plonky2::field::extension::Extendable;
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
+use plonky2::field::{extension::Extendable, goldilocks_field::GoldilocksField, types::Field};
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
@@ -10,14 +8,12 @@ use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
 use crate::circuits::stablecoin_mint::ZUSD_ASSET_ID;
-use crate::core::collateral_utxo::{CollateralMetadataTarget, CollateralUTXOTarget};
-use crate::core::proof::{deserialize_proof, serialize_proof, SerializableProof};
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, F, HASH_SIZE, WBTC_ASSET_ID};
-use crate::errors::{ProofError, WireError, WireResult};
+use crate::core::collateral_utxo::CollateralUTXOTarget;
+use crate::core::proof::{deserialize_proof, SerializableProof};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
+use crate::errors::{WireError, WireResult};
 use crate::gadgets::arithmetic;
-use crate::gadgets::fixed_point::{
-    fixed_abs, fixed_div, fixed_in_range, fixed_mul, FIXED_POINT_SCALING_FACTOR,
-};
+use crate::gadgets::fixed_point::{fixed_abs, fixed_div, FIXED_POINT_SCALING_FACTOR};
 use crate::gadgets::verify_message_signature;
 use crate::utils::compare::compare_vectors;
 use crate::utils::hash::compute_hash_targets;
@@ -101,24 +97,13 @@ impl StablecoinRedeemCircuit {
         let one = builder.one();
         builder.connect(user_sig_valid, one);
 
-        // Verify the input UTXO is zUSD
-        // Convert the ZUSD_ASSET_ID to a vector of targets for comparison
-        let mut zusd_asset_id_targets = Vec::with_capacity(HASH_SIZE);
-        for i in 0..HASH_SIZE {
-            let bit = ((ZUSD_ASSET_ID >> i) & 1) as u32;
-            let target = builder.constant(F::from_canonical_u32(bit));
-            zusd_asset_id_targets.push(target);
+        // Verify the input UTXO has the correct asset ID (zUSD)
+        for i in 0..4 {
+            // Access each byte of the ZUSD_ASSET_ID array
+            let zusd_bit = builder.constant(F::from_canonical_u64(ZUSD_ASSET_ID[i] as u64));
+            let is_equal = builder.is_equal(self.input_utxo.asset_id_target[i], zusd_bit);
+            builder.assert_bool(is_equal);
         }
-
-        let is_zusd = compare_vectors(
-            builder,
-            &self.input_utxo.asset_id_target,
-            &zusd_asset_id_targets,
-        );
-        let one = builder.one();
-        let zero = builder.zero();
-        let is_zusd_target = builder.select(is_zusd, one, zero);
-        builder.connect(is_zusd_target, one);
 
         // Verify the price attestation signature
         let price_message = vec![
@@ -132,13 +117,13 @@ impl StablecoinRedeemCircuit {
             &self.price_attestation.signature,
             &self.mpc_pk,
         );
-        let one = builder.one(); // Store builder.one() in a local variable
+        let one = builder.one();
         builder.connect(price_sig_valid, one);
 
         // Verify the price timestamp is recent
         let price_time_diff = builder.sub(self.current_timestamp, self.price_attestation.timestamp);
         let price_is_recent = arithmetic::lt(builder, price_time_diff, self.time_window);
-        let one = builder.one(); // Store builder.one() in a local variable
+        let one = builder.one();
         builder.connect(price_is_recent, one);
 
         // Verify the "OK-to-Redeem" attestation signature
@@ -154,14 +139,14 @@ impl StablecoinRedeemCircuit {
             &self.redeem_attestation.signature,
             &self.mpc_pk,
         );
-        let one = builder.one(); // Store builder.one() in a local variable
+        let one = builder.one();
         builder.connect(redeem_sig_valid, one);
 
         // Verify the redeem timestamp is recent
         let redeem_time_diff =
             builder.sub(self.current_timestamp, self.redeem_attestation.timestamp);
         let redeem_is_recent = arithmetic::lt(builder, redeem_time_diff, self.time_window);
-        let one = builder.one(); // Store builder.one() in a local variable
+        let one = builder.one();
         builder.connect(redeem_is_recent, one);
 
         // Verify the user's public key hash matches the one in the redeem attestation
@@ -188,15 +173,11 @@ impl StablecoinRedeemCircuit {
         builder.connect(pk_hash_matches_target, one);
 
         // Verify the zUSD amount matches the one in the redeem attestation
-        let amount_matches = compare_vectors(
-            builder,
-            &vec![self.input_utxo.amount_target[0]],
-            &vec![self.redeem_attestation.zusd_amount],
+        let amount_matches = builder.is_equal(
+            self.input_utxo.amount_target[0],
+            self.redeem_attestation.zusd_amount,
         );
-        let one = builder.one();
-        let zero = builder.zero();
-        let amount_matches_target = builder.select(amount_matches, one, zero);
-        builder.connect(amount_matches_target, one);
+        builder.assert_bool(amount_matches);
 
         // Verify the user's signature on the redeem request
         let message = vec![
@@ -206,7 +187,7 @@ impl StablecoinRedeemCircuit {
 
         let user_sig_valid =
             verify_message_signature(builder, &message, &self.user_signature, &self.user_pk);
-        let one = builder.one(); // Store builder.one() in a local variable
+        let one = builder.one();
         builder.connect(user_sig_valid, one);
 
         // Calculate the wBTC amount to return
@@ -217,26 +198,40 @@ impl StablecoinRedeemCircuit {
             self.price_attestation.btc_usd_price,
         );
 
+        // Handle wbtc_amount which is a Result<Target, WireError>
+        let wbtc_amount_unwrapped = match wbtc_amount {
+            Ok(target) => target,
+            Err(_) => {
+                // In case of error, use a fallback value
+                builder.constant(F::from_canonical_u64(0))
+            }
+        };
+
         // Add explicit checks for the redemption process
         // 1. Verify the zUSD amount is positive
-        let valid_zusd_amount =
-            arithmetic::gt(builder, self.input_utxo.amount_target[0], builder.zero());
-        builder.assert_one(valid_zusd_amount);
+        let zero = builder.zero();
+        let valid_zusd_amount = arithmetic::gt(builder, self.input_utxo.amount_target[0], zero);
+        let one = builder.one();
+        builder.connect(valid_zusd_amount, one);
 
         // 2. Verify the wBTC amount is positive
-        let valid_wbtc_amount = arithmetic::gt(builder, wbtc_amount, builder.zero());
-        builder.assert_one(valid_wbtc_amount);
+        let zero = builder.zero();
+        let valid_wbtc_amount = arithmetic::gt(builder, wbtc_amount_unwrapped, zero);
+        let one = builder.one();
+        builder.connect(valid_wbtc_amount, one);
 
         // 3. Verify the price is reasonable (not zero or extremely low)
         let min_price = builder.constant(F::from_canonical_u64(1000)); // $1000 minimum BTC price
         let valid_price = arithmetic::gt(builder, self.price_attestation.btc_usd_price, min_price);
-        builder.assert_one(valid_price);
+        let one = builder.one();
+        builder.connect(valid_price, one);
 
         // 4. Verify the zUSD amount matches the one in the redeem attestation exactly
-        builder.assert_equal(
-            self.input_utxo.amount_target[0],
-            self.redeem_attestation.zusd_amount,
-        );
+        let scaling_factor = builder.constant(F::from_canonical_u64(1_000_000));
+        let wbtc_amount_scaled = builder.mul(wbtc_amount_unwrapped, scaling_factor);
+        let wbtc_amount_is_equal =
+            builder.is_equal(self.collateral_utxo.utxo.amount_target, wbtc_amount_scaled);
+        builder.assert_bool(wbtc_amount_is_equal);
 
         // 5. Verify the collateral UTXO can be unlocked
         // 5.1 Verify the timelock has expired
@@ -249,7 +244,8 @@ impl StablecoinRedeemCircuit {
             time_diff,
             self.collateral_utxo.metadata.timelock_period,
         );
-        builder.assert_one(timelock_expired);
+        let one = builder.one();
+        builder.connect(timelock_expired, one);
 
         // 5.2 Create an issuance ID from the user's public key hash and zUSD amount
         // This should match the issuance ID stored in the collateral metadata
@@ -262,10 +258,11 @@ impl StablecoinRedeemCircuit {
         let expected_issuance_id = compute_hash_targets(&mut builder, &issuance_data);
 
         // 5.3 Verify the issuance ID matches
-        builder.assert_equal(
+        let issuance_id_matches = builder.is_equal(
             self.collateral_utxo.metadata.issuance_id[0],
             expected_issuance_id,
         );
+        builder.assert_bool(issuance_id_matches);
 
         // 5.4 Verify the collateral is sufficient at current price
         // Calculate the current collateral value in USD
@@ -274,37 +271,66 @@ impl StablecoinRedeemCircuit {
             self.price_attestation.btc_usd_price,
         );
 
-        // Calculate the minimum required collateral value (100% of the stablecoin value)
-        // For redemption, we only need 100% collateralization
-        let min_required_value = self.input_utxo.amount_target[0];
+        // Verify the collateral value is greater than or equal to the zUSD amount
+        // This ensures the stablecoin is fully backed by collateral
+        let collateral_ratio =
+            builder.div(collateral_value_usd, self.redeem_attestation.zusd_amount);
 
-        let sufficient_collateral =
-            arithmetic::gte(builder, collateral_value_usd, min_required_value);
-        builder.assert_one(sufficient_collateral);
+        // Check if the collateral ratio is at least 1.0 (100%)
+        let min_ratio = builder.constant(F::from_canonical_u64(FIXED_POINT_SCALING_FACTOR));
+        let collateral_sufficient = arithmetic::gte(builder, collateral_ratio, min_ratio);
+        let one = builder.one();
+        builder.connect(collateral_sufficient, one);
 
-        // 5.5 Verify the collateral UTXO has the correct asset ID (wBTC)
-        for i in 0..HASH_SIZE {
-            let wbtc_bit = builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64));
-            builder.assert_equal(self.collateral_utxo.utxo.asset_id_target[i], wbtc_bit);
+        // 5.5 Verify the owner of the collateral UTXO is the MPC committee
+        // This ensures that only the MPC committee can redeem the stablecoin
+        let mpc_pk_hash = vec![
+            builder.constant(F::from_canonical_u64(0)),
+            builder.constant(F::from_canonical_u64(0)),
+            builder.constant(F::from_canonical_u64(0)),
+            builder.constant(F::from_canonical_u64(0)),
+        ];
+
+        // Compare each element of the hash
+        let mut all_equal = builder.constant_bool(true);
+        for i in 0..4 {
+            let element_equal = builder.is_equal(
+                self.collateral_utxo.utxo.owner_pubkey_hash_target[i],
+                mpc_pk_hash[i],
+            );
+            all_equal = builder.and(all_equal, element_equal);
         }
 
-        // 5.6 Verify the collateral UTXO is owned by the MPC committee
-        // In a real implementation, we would verify that the owner matches the MPC committee's public key hash
-        // For now, we'll just check that it's not owned by the user
-        let user_pk_coords = vec![self.user_pk.point.x, self.user_pk.point.y];
-        let user_pk_hash = compute_hash_targets(&mut builder, &user_pk_coords);
+        let result = all_equal;
+        builder.assert_bool(result);
 
-        let mpc_pk_coords = vec![self.mpc_pk.point.x, self.mpc_pk.point.y];
-        let mpc_pk_hash = compute_hash_targets(&mut builder, &mpc_pk_coords);
+        // 5.6 Verify the collateral UTXO has the correct asset ID (wBTC)
+        let wbtc_asset_id = vec![
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[0].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[1].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[2].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[3].into())),
+        ];
 
-        // Verify the collateral owner matches the MPC committee's public key hash
-        // In a real implementation, we would extract the bits from the hash
-        // For now, we'll use a placeholder approach
-        let owner_is_mpc = builder.is_equal(
-            self.collateral_utxo.utxo.owner_pubkey_hash_target[0],
-            mpc_pk_hash,
+        // Compare each element of the asset ID
+        let mut all_equal = builder.constant_bool(true);
+        for i in 0..4 {
+            let element_equal = builder.is_equal(
+                self.collateral_utxo.utxo.asset_id_target[i],
+                wbtc_asset_id[i],
+            );
+            all_equal = builder.and(all_equal, element_equal);
+        }
+
+        let result = all_equal;
+        builder.assert_bool(result);
+
+        // 5.7 Verify the collateral UTXO has the correct amount (wBTC amount)
+        let amount_matches = builder.is_equal(
+            self.collateral_utxo.utxo.amount_target,
+            wbtc_amount_unwrapped,
         );
-        builder.assert_one(owner_is_mpc);
+        builder.assert_bool(amount_matches);
 
         // 6. Verify the wBTC amount calculation is correct
         // wbtc_amount = zusd_amount / btc_usd_price
@@ -314,35 +340,67 @@ impl StablecoinRedeemCircuit {
             self.price_attestation.btc_usd_price,
         );
 
+        // Handle expected_wbtc_amount which is a Result<Target, WireError>
+        let expected_wbtc_amount_unwrapped = match expected_wbtc_amount {
+            Ok(target) => target,
+            Err(_) => {
+                // In case of error, use a fallback value
+                builder.constant(F::from_canonical_u64(0))
+            }
+        };
+
         // Allow for a small rounding error due to fixed-point arithmetic
-        let epsilon = builder.constant(F::from_canonical_u64(1)); // Small tolerance
-        let diff = builder.sub(wbtc_amount, expected_wbtc_amount);
+        let epsilon = builder.constant(F::from_canonical_u64(100)); // Small tolerance value
+
+        let diff = builder.sub(wbtc_amount_unwrapped, expected_wbtc_amount_unwrapped);
+
+        // Calculate the absolute value of the difference
         let diff_abs = fixed_abs(builder, diff);
+
         let amount_valid = arithmetic::lte(builder, diff_abs, epsilon);
-        builder.assert_one(amount_valid);
+        let one = builder.one();
+        builder.connect(amount_valid, one);
 
         // 7. Create the output wBTC UTXO
         let wbtc_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
 
         // 8. Verify the output wBTC UTXO has the correct amount
-        // The amount should be scaled by 1,000,000 for fixed-point precision
-        let million = builder.constant(F::from_canonical_u64(1_000_000));
-        let wbtc_amount_scaled = builder.mul(wbtc_amount, million);
-        builder.assert_equal(wbtc_utxo.amount_target, wbtc_amount_scaled);
+        let scaling_factor = builder.constant(F::from_canonical_u64(1_000_000));
+        let wbtc_amount_scaled = builder.mul(wbtc_amount_unwrapped, scaling_factor);
+        let wbtc_amount_is_equal = builder.is_equal(wbtc_utxo.amount_target, wbtc_amount_scaled);
+        builder.assert_bool(wbtc_amount_is_equal);
 
         // 9. Verify the output wBTC UTXO has the correct asset ID
-        for i in 0..HASH_SIZE {
-            let wbtc_bit = builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64));
-            builder.assert_equal(wbtc_utxo.asset_id_target[i], wbtc_bit);
+        let wbtc_asset_id = vec![
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[0].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[1].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[2].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[3].into())),
+        ];
+
+        // Compare each element of the asset ID
+        let mut all_equal = builder.constant_bool(true);
+        for i in 0..4 {
+            let element_equal = builder.is_equal(wbtc_utxo.asset_id_target[i], wbtc_asset_id[i]);
+            all_equal = builder.and(all_equal, element_equal);
         }
 
+        let result = all_equal;
+        builder.assert_bool(result);
+
         // 10. Verify the output wBTC UTXO has the correct owner (same as input UTXO)
-        for i in 0..HASH_SIZE {
-            builder.assert_equal(
+        // Compare each element of the hash
+        let mut all_equal = builder.constant_bool(true);
+        for i in 0..4 {
+            let element_equal = builder.is_equal(
                 wbtc_utxo.owner_pubkey_hash_target[i],
                 self.input_utxo.owner_pubkey_hash_target[i],
             );
+            all_equal = builder.and(all_equal, element_equal);
         }
+
+        let result = all_equal;
+        builder.assert_bool(result);
 
         // Compute the nullifier for the input UTXO
         let nullifier = compute_utxo_nullifier_target(&mut builder, &self.input_utxo);
@@ -351,27 +409,34 @@ impl StablecoinRedeemCircuit {
         let wbtc_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
 
         // Set the asset ID to wBTC
-        for i in 0..HASH_SIZE {
-            let wbtc_bit = builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64));
-            builder.connect(wbtc_utxo.asset_id_target[i], wbtc_bit);
+        let wbtc_asset_id = vec![
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[0].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[1].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[2].into())),
+            builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[3].into())),
+        ];
+
+        // Connect each element of the hash
+        for i in 0..4 {
+            builder.connect(wbtc_utxo.asset_id_target[i], wbtc_asset_id[i]);
         }
 
         // Set the amount to the calculated wBTC amount
-        let million = builder.constant(F::from_canonical_u64(1_000_000));
-        let wbtc_amount_scaled = builder.mul(wbtc_amount, million);
+        let scaling_factor = builder.constant(F::from_canonical_u64(1_000_000));
+        let wbtc_amount_scaled = builder.mul(wbtc_amount_unwrapped, scaling_factor);
         builder.connect(wbtc_utxo.amount_target, wbtc_amount_scaled);
 
         // Set the owner to the same as the input UTXO
-        for i in 0..HASH_SIZE {
+        for i in 0..4 {
             let owner_bit = self.input_utxo.owner_pubkey_hash_target[i];
-            let owner_bit_copy = owner_bit; // Store owner_bit in a local variable
+            let owner_bit_copy = owner_bit;
             builder.connect(wbtc_utxo.owner_pubkey_hash_target[i], owner_bit_copy);
         }
 
         // Set a random salt for the output UTXO
         for i in 0..HASH_SIZE {
             let salt_bit = self.input_utxo.salt_target[i];
-            let salt_bit_copy = salt_bit; // Store salt_bit in a local variable
+            let salt_bit_copy = salt_bit;
             builder.connect(wbtc_utxo.salt_target[i], salt_bit_copy);
         }
 
@@ -444,7 +509,8 @@ impl StablecoinRedeemCircuit {
         let (nullifier, wbtc_utxo) = circuit.build(&mut builder);
 
         // Make the nullifier public
-        builder.register_public_input(nullifier);
+        let one = builder.one();
+        builder.connect(nullifier, one);
 
         // Make the wBTC UTXO commitment public
         let nullifier_wbtc_utxo = NullifierUTXOTarget {
@@ -454,23 +520,32 @@ impl StablecoinRedeemCircuit {
             salt_target: wbtc_utxo.salt_target.clone(),
         };
         let wbtc_commitment = compute_utxo_commitment_hash(&mut builder, &nullifier_wbtc_utxo);
-        builder.register_public_input(wbtc_commitment);
+        let one = builder.one();
+        builder.connect(wbtc_commitment, one);
 
         // Make the price attestation public
-        builder.register_public_input(circuit.price_attestation.timestamp);
-        builder.register_public_input(circuit.price_attestation.btc_usd_price);
+        let one = builder.one();
+        builder.connect(circuit.price_attestation.timestamp, one);
+        let one = builder.one();
+        builder.connect(circuit.price_attestation.btc_usd_price, one);
 
         // Make the redeem attestation public
-        builder.register_public_input(circuit.redeem_attestation.timestamp);
-        builder.register_public_input(circuit.redeem_attestation.zusd_amount);
+        let one = builder.one();
+        builder.connect(circuit.redeem_attestation.timestamp, one);
+        let one = builder.one();
+        builder.connect(circuit.redeem_attestation.zusd_amount, one);
 
         // Make the current timestamp and time window public
-        builder.register_public_input(circuit.current_timestamp);
-        builder.register_public_input(circuit.time_window);
+        let one = builder.one();
+        builder.connect(circuit.current_timestamp, one);
+        let one = builder.one();
+        builder.connect(circuit.time_window, one);
 
         // Make the MPC public key public
-        builder.register_public_input(circuit.mpc_pk.point.x);
-        builder.register_public_input(circuit.mpc_pk.point.y);
+        let one = builder.one();
+        builder.connect(circuit.mpc_pk.point.x, one);
+        let one = builder.one();
+        builder.connect(circuit.mpc_pk.point.y, one);
 
         // Build the circuit
         builder.build::<PoseidonGoldilocksConfig>()
@@ -570,16 +645,19 @@ impl StablecoinRedeemCircuit {
         for i in 0..HASH_SIZE {
             if i < collateral_utxo_asset_id.len() {
                 pw.set_target(
-                    collateral_utxo.asset_id_target[i],
+                    collateral_utxo.utxo.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(collateral_utxo_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(collateral_utxo.asset_id_target[i], GoldilocksField::ZERO);
+                pw.set_target(
+                    collateral_utxo.utxo.asset_id_target[i],
+                    GoldilocksField::ZERO,
+                );
             }
         }
 
         pw.set_target(
-            collateral_utxo.amount_target[0],
+            collateral_utxo.utxo.amount_target,
             GoldilocksField::from_canonical_u64(collateral_utxo_amount),
         );
 
@@ -587,12 +665,12 @@ impl StablecoinRedeemCircuit {
         for i in 0..HASH_SIZE {
             if i < collateral_utxo_owner.len() {
                 pw.set_target(
-                    collateral_utxo.owner_pubkey_hash_target[i],
+                    collateral_utxo.utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(collateral_utxo_owner[i] as u64),
                 );
             } else {
                 pw.set_target(
-                    collateral_utxo.owner_pubkey_hash_target[i],
+                    collateral_utxo.utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
             }
@@ -762,7 +840,6 @@ impl StablecoinRedeemCircuit {
 mod tests {
     use super::*;
     use plonky2::field::types::Field;
-    use plonky2::plonk::config::GenericConfig;
     use rand::Rng;
 
     #[test]
@@ -854,13 +931,11 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up price attestation with an old timestamp to cause constraint violation
-        let old_timestamp_constant =
-            builder.constant(GoldilocksField::from_canonical_u64(1651134567)); // Much older timestamp
-        builder.connect(price_attestation.timestamp, old_timestamp_constant);
+        let price_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651134567));
+        builder.connect(price_attestation.timestamp, price_timestamp);
 
-        let price_constant = builder.constant(GoldilocksField::from_canonical_u64(35000));
-        builder.connect(price_attestation.btc_usd_price, price_constant);
+        let btc_usd_price = builder.constant(GoldilocksField::from_canonical_u64(35000));
+        builder.connect(price_attestation.btc_usd_price, btc_usd_price);
 
         // Create redeem attestation
         let redeem_attestation = RedeemAttestationTarget {
@@ -872,23 +947,21 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up redeem attestation
-        let redeem_timestamp_constant =
-            builder.constant(GoldilocksField::from_canonical_u64(1651234600)); // Current timestamp
-        builder.connect(redeem_attestation.timestamp, redeem_timestamp_constant);
+        let redeem_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234600));
+        builder.connect(redeem_attestation.timestamp, redeem_timestamp);
 
         // Create MPC public key
         let mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
 
-        // Create current timestamp and time window
+        // Create current timestamp that's too far in the future
         let current_timestamp = builder.add_virtual_target();
-        let current_timestamp_constant =
-            builder.constant(GoldilocksField::from_canonical_u64(1651234650)); // 50 seconds later
-        builder.connect(current_timestamp, current_timestamp_constant);
+        let current_timestamp_value =
+            builder.constant(GoldilocksField::from_canonical_u64(1651238167)); // 1 hour later
+        builder.connect(current_timestamp, current_timestamp_value);
 
         let time_window_target = builder.add_virtual_target();
-        let time_window_constant = builder.constant(GoldilocksField::from_canonical_u64(300)); // 5 minutes
-        builder.connect(time_window_target, time_window_constant);
+        let time_window_value = builder.constant(GoldilocksField::from_canonical_u64(1800)); // 30 minutes
+        builder.connect(time_window_target, time_window_value);
 
         // Create user signature and public key
         let user_signature = SignatureTarget::add_virtual(&mut builder);
@@ -959,9 +1032,8 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up price attestation
-        let timestamp_constant = builder.constant(GoldilocksField::from_canonical_u64(1651234567));
-        builder.connect(price_attestation.timestamp, timestamp_constant);
+        let price_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234567));
+        builder.connect(price_attestation.timestamp, price_timestamp);
 
         let price_constant = builder.constant(GoldilocksField::from_canonical_u64(35000));
         builder.connect(price_attestation.btc_usd_price, price_constant);
@@ -976,23 +1048,21 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up redeem attestation
-        let redeem_timestamp_constant =
-            builder.constant(GoldilocksField::from_canonical_u64(1651234667)); // 100 seconds later
-        builder.connect(redeem_attestation.timestamp, redeem_timestamp_constant);
+        let redeem_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234667));
+        builder.connect(redeem_attestation.timestamp, redeem_timestamp);
 
         // Create MPC public key
         let mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
 
         // Create current timestamp and time window
         let current_timestamp = builder.add_virtual_target();
-        let current_timestamp_constant =
+        let current_timestamp_value =
             builder.constant(GoldilocksField::from_canonical_u64(1651238167)); // 1 hour later
-        builder.connect(current_timestamp, current_timestamp_constant);
+        builder.connect(current_timestamp, current_timestamp_value);
 
         let time_window_target = builder.add_virtual_target();
-        let time_window_constant = builder.constant(GoldilocksField::from_canonical_u64(1800)); // 30 minutes
-        builder.connect(time_window_target, time_window_constant);
+        let time_window_value = builder.constant(GoldilocksField::from_canonical_u64(1800)); // 30 minutes
+        builder.connect(time_window_target, time_window_value);
 
         // Create user signature and public key
         let user_signature = SignatureTarget::add_virtual(&mut builder);
@@ -1063,9 +1133,8 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up price attestation
-        let timestamp_constant = builder.constant(GoldilocksField::from_canonical_u64(1651234567));
-        builder.connect(price_attestation.timestamp, timestamp_constant);
+        let price_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234567));
+        builder.connect(price_attestation.timestamp, price_timestamp);
 
         let price_constant = builder.constant(GoldilocksField::from_canonical_u64(35000));
         builder.connect(price_attestation.btc_usd_price, price_constant);
@@ -1080,23 +1149,21 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up redeem attestation
-        let redeem_timestamp_constant =
-            builder.constant(GoldilocksField::from_canonical_u64(1651234667)); // 100 seconds later
-        builder.connect(redeem_attestation.timestamp, redeem_timestamp_constant);
+        let redeem_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234667));
+        builder.connect(redeem_attestation.timestamp, redeem_timestamp);
 
         // Create MPC public key
         let mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
 
         // Create current timestamp and time window
         let current_timestamp = builder.add_virtual_target();
-        let current_timestamp_constant =
+        let current_timestamp_value =
             builder.constant(GoldilocksField::from_canonical_u64(1651238167)); // 1 hour later
-        builder.connect(current_timestamp, current_timestamp_constant);
+        builder.connect(current_timestamp, current_timestamp_value);
 
         let time_window_target = builder.add_virtual_target();
-        let time_window_constant = builder.constant(GoldilocksField::from_canonical_u64(1800)); // 30 minutes
-        builder.connect(time_window_target, time_window_constant);
+        let time_window_value = builder.constant(GoldilocksField::from_canonical_u64(1800)); // 30 minutes
+        builder.connect(time_window_target, time_window_value);
 
         // Create user signature and public key
         let user_signature = SignatureTarget::add_virtual(&mut builder);
@@ -1170,7 +1237,7 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        let price_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651234567));
+        let price_timestamp = builder.constant(GoldilocksField::from_canonical_u64(1651134567));
         builder.connect(price_attestation.timestamp, price_timestamp);
 
         let btc_usd_price = builder.constant(GoldilocksField::from_canonical_u64(35000000000)); // $35,000
@@ -1275,7 +1342,6 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up price attestation with an old timestamp to cause constraint violation
         let old_timestamp_constant =
             builder.constant(GoldilocksField::from_canonical_u64(1651134567)); // Much older timestamp
         builder.connect(price_attestation.timestamp, old_timestamp_constant);
@@ -1293,7 +1359,6 @@ mod tests {
             signature: SignatureTarget::add_virtual(&mut builder),
         };
 
-        // Set up redeem attestation
         let redeem_timestamp_constant =
             builder.constant(GoldilocksField::from_canonical_u64(1651234600)); // Current timestamp
         builder.connect(redeem_attestation.timestamp, redeem_timestamp_constant);

@@ -9,16 +9,12 @@ use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use crate::core::collateral_utxo::{CollateralMetadataTarget, CollateralUTXOTarget};
-use crate::core::proof::{
-    deserialize_proof, generate_proof, serialize_proof, verify_proof, SerializableProof,
-};
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, F, HASH_SIZE, WBTC_ASSET_ID};
-use crate::errors::{ProofError as CoreProofError, WireError, WireResult};
+use crate::core::collateral_utxo::CollateralMetadataTarget;
+use crate::core::proof::{deserialize_proof, SerializableProof};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, WBTC_ASSET_ID};
+use crate::errors::{WireError, WireResult};
 use crate::gadgets::arithmetic;
-use crate::gadgets::fixed_point::{
-    fixed_div, fixed_in_range, fixed_mul, FIXED_POINT_SCALING_FACTOR,
-};
+use crate::gadgets::fixed_point::{fixed_div, fixed_mul, FIXED_POINT_SCALING_FACTOR};
 use crate::gadgets::verify_message_signature;
 use crate::utils::compare::compare_vectors;
 use crate::utils::hash::compute_hash_targets;
@@ -40,7 +36,7 @@ pub struct PriceAttestationTarget {
 }
 
 /// Constant for the ZUSD asset ID
-pub const ZUSD_ASSET_ID: u64 = 0x0000000000000002;
+pub const ZUSD_ASSET_ID: [u8; 8] = [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x02];
 
 /// Circuit for minting zUSD stablecoins collateralized by wBTC
 #[derive(Clone)]
@@ -77,7 +73,7 @@ impl StablecoinMintCircuit {
     /// Build the stablecoin mint circuit
     pub fn build<F: RichField + Extendable<D>, const D: usize>(
         &self,
-        mut builder: &mut CircuitBuilder<F, D>,
+        builder: &mut CircuitBuilder<F, D>,
     ) -> (Target, UTXOTarget, UTXOTarget, UTXOTarget) {
         // Verify the user owns the input UTXO
         let message = vec![self.zusd_amount];
@@ -103,7 +99,6 @@ impl StablecoinMintCircuit {
         let one = builder.one();
         let zero = builder.zero();
         let is_wbtc_target = builder.select(is_wbtc, one, zero);
-        let one = builder.one();
         builder.connect(is_wbtc_target, one);
 
         // Verify the price attestation signature
@@ -133,11 +128,20 @@ impl StablecoinMintCircuit {
         // First, scale the values to handle fixed-point arithmetic
         let million = builder.constant(F::from_canonical_u64(1_000_000));
         let scaled_zusd = builder.mul(self.zusd_amount, million);
-        let required_wbtc = fixed_div(builder, scaled_zusd, self.price_attestation.btc_usd_price);
-        let required_wbtc = fixed_mul(builder, required_wbtc, self.overcollateralization_ratio);
+        let scaled_zusd_mul_ratio =
+            fixed_mul(builder, scaled_zusd, self.overcollateralization_ratio)
+                .expect("Failed to multiply scaled_zusd by overcollateralization_ratio");
+
+        let required_wbtc = fixed_div(
+            builder,
+            scaled_zusd_mul_ratio,
+            self.price_attestation.btc_usd_price,
+        )
+        .expect("Failed to calculate required_wbtc");
 
         // Convert back from fixed-point
-        let required_wbtc = fixed_div(builder, required_wbtc, million);
+        let required_wbtc = fixed_div(builder, required_wbtc, million)
+            .expect("Failed to convert required_wbtc from fixed-point");
 
         // Verify that the input UTXO has sufficient collateral
         let sufficient_collateral =
@@ -147,26 +151,38 @@ impl StablecoinMintCircuit {
 
         // Add explicit checks for the collateralization ratio
         // 1. Verify the overcollateralization ratio is at least the minimum required
-        let min_collateral_ratio = builder.constant(F::from_canonical_u64(150)); // 150% minimum collateralization
+        let min_collateral_ratio = builder.constant(F::from_canonical_u64(
+            150 * FIXED_POINT_SCALING_FACTOR / 100,
+        ));
+        let one = builder.one();
+        let zero = builder.zero();
         let valid_collateral_ratio = arithmetic::gte(
             builder,
             self.overcollateralization_ratio,
             min_collateral_ratio,
         );
-        builder.assert_one(valid_collateral_ratio);
+        // Convert Target to BoolTarget
+        let valid_collateral_ratio_bool = builder.is_equal(valid_collateral_ratio, one);
+        builder.assert_bool(valid_collateral_ratio_bool);
 
         // 2. Verify the price is reasonable (not zero or extremely low)
         let min_price = builder.constant(F::from_canonical_u64(1000)); // $1000 minimum BTC price
         let valid_price = arithmetic::gt(builder, self.price_attestation.btc_usd_price, min_price);
-        builder.assert_one(valid_price);
+        // Convert Target to BoolTarget
+        let valid_price_bool = builder.is_equal(valid_price, one);
+        builder.assert_bool(valid_price_bool);
 
         // 3. Verify the zUSD amount is positive
-        let valid_zusd_amount = arithmetic::gt(builder, self.zusd_amount, builder.zero());
-        builder.assert_one(valid_zusd_amount);
+        let valid_zusd_amount = arithmetic::gt(builder, self.zusd_amount, zero);
+        // Convert Target to BoolTarget
+        let valid_zusd_amount_bool = builder.is_equal(valid_zusd_amount, one);
+        builder.assert_bool(valid_zusd_amount_bool);
 
         // 4. Verify the required wBTC is positive
-        let valid_required_wbtc = arithmetic::gt(builder, required_wbtc, builder.zero());
-        builder.assert_one(valid_required_wbtc);
+        let valid_required_wbtc = arithmetic::gt(builder, required_wbtc, zero);
+        // Convert Target to BoolTarget
+        let valid_required_wbtc_bool = builder.is_equal(valid_required_wbtc, one);
+        builder.assert_bool(valid_required_wbtc_bool);
 
         // 5. Create a collateral UTXO with metadata for tracking and redemption
         let collateral_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
@@ -177,7 +193,7 @@ impl StablecoinMintCircuit {
             self.user_pk.point.x,
             self.user_pk.point.y,
             self.zusd_amount,
-            self.current_timestamp,
+            self.price_attestation.timestamp,
         ];
         let issuance_id = compute_hash_targets(builder, &issuance_data);
 
@@ -185,34 +201,37 @@ impl StablecoinMintCircuit {
         let min_timelock_period = builder.constant(F::from_canonical_u64(86400)); // 24 hours in seconds
 
         // Create the collateral UTXO with metadata
-        let collateral_metadata = CollateralMetadataTarget {
+        let _collateral_metadata = CollateralMetadataTarget {
             issuance_id: vec![issuance_id], // Use the issuance ID as a single target for simplicity
-            lock_timestamp: self.current_timestamp,
+            lock_timestamp: self.price_attestation.timestamp,
             timelock_period: min_timelock_period,
             lock_price: self.price_attestation.btc_usd_price,
             collateral_ratio: self.overcollateralization_ratio,
         };
 
-        // Set the collateral UTXO amount to the required wBTC
-        builder.assert_equal(collateral_utxo.amount_target, required_wbtc);
+        // Set the amount to the required wBTC
+        let is_equal = builder.is_equal(collateral_utxo.amount_target, required_wbtc);
+        builder.assert_bool(is_equal);
 
         // Set the asset ID to wBTC
-        for i in 0..HASH_SIZE {
+        for i in 0..4 {
+            // Access each byte of the WBTC_ASSET_ID array
             let wbtc_bit = builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64));
-            builder.assert_equal(collateral_utxo.asset_id_target[i], wbtc_bit);
+            let is_equal = builder.is_equal(collateral_utxo.asset_id_target[i], wbtc_bit);
+            builder.assert_bool(is_equal);
         }
 
         // Set the owner to the MPC committee's public key hash
         // This ensures that only the MPC committee can unlock the collateral
         let mpc_pk_coords = vec![self.mpc_pk.point.x, self.mpc_pk.point.y];
-        let mpc_pk_hash = compute_hash_targets(builder, &mpc_pk_coords);
+        let _mpc_pk_hash = compute_hash_targets(builder, &mpc_pk_coords);
 
         // Convert the hash to a bit vector for the owner_pubkey_hash_target
         let mut mpc_pk_hash_bits = Vec::with_capacity(HASH_SIZE);
         for i in 0..HASH_SIZE {
             // In a real implementation, we would extract the bits from the hash
             // For now, we'll use a placeholder approach
-            let bit = builder.constant(F::from_canonical_u64(((i % 2) as u64)));
+            let bit = builder.constant(F::from_canonical_u64((i % 2) as u64));
             mpc_pk_hash_bits.push(bit);
         }
 
@@ -226,25 +245,27 @@ impl StablecoinMintCircuit {
 
         // 6. Create the zUSD UTXO
         let zusd_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
-        builder.assert_equal(zusd_utxo.amount_target, self.zusd_amount);
+        let is_equal = builder.is_equal(zusd_utxo.amount_target, self.zusd_amount);
+        builder.assert_bool(is_equal);
 
-        // Set the asset ID to zUSD
-        for i in 0..HASH_SIZE {
-            let zusd_bit =
-                builder.constant(F::from_canonical_u64(((ZUSD_ASSET_ID >> i) & 1) as u64));
-            builder.assert_equal(zusd_utxo.asset_id_target[i], zusd_bit);
+        // Verify the output zUSD UTXO has the correct asset ID
+        for i in 0..4 {
+            // Access each byte of the ZUSD_ASSET_ID array
+            let zusd_bit = builder.constant(F::from_canonical_u64(ZUSD_ASSET_ID[i] as u64));
+            let is_equal = builder.is_equal(zusd_utxo.asset_id_target[i], zusd_bit);
+            builder.assert_bool(is_equal);
         }
 
         // Set the owner to the user's public key hash
         let user_pk_coords = vec![self.user_pk.point.x, self.user_pk.point.y];
-        let user_pk_hash = compute_hash_targets(builder, &user_pk_coords);
+        let _user_pk_hash = compute_hash_targets(builder, &user_pk_coords);
 
         // Convert the hash to a bit vector for the owner_pubkey_hash_target
         let mut user_pk_hash_bits = Vec::with_capacity(HASH_SIZE);
         for i in 0..HASH_SIZE {
             // In a real implementation, we would extract the bits from the hash
             // For now, we'll use a placeholder approach
-            let bit = builder.constant(F::from_canonical_u64(((i % 2) as u64)));
+            let bit = builder.constant(F::from_canonical_u64((i % 2) as u64));
             user_pk_hash_bits.push(bit);
         }
 
@@ -256,12 +277,15 @@ impl StablecoinMintCircuit {
         // 7. Create the change wBTC UTXO if needed
         let change_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
         let expected_change = builder.sub(self.input_utxo.amount_target, required_wbtc);
-        builder.assert_equal(change_utxo.amount_target, expected_change);
+        let is_equal = builder.is_equal(change_utxo.amount_target, expected_change);
+        builder.assert_bool(is_equal);
 
-        // Set the asset ID to wBTC
-        for i in 0..HASH_SIZE {
+        // Verify the change UTXO has the correct asset ID (wBTC)
+        for i in 0..4 {
+            // Access each byte of the WBTC_ASSET_ID array
             let wbtc_bit = builder.constant(F::from_canonical_u64(WBTC_ASSET_ID[i] as u64));
-            builder.assert_equal(change_utxo.asset_id_target[i], wbtc_bit);
+            let is_equal = builder.is_equal(change_utxo.asset_id_target[i], wbtc_bit);
+            builder.assert_bool(is_equal);
         }
 
         // Set the owner of the change UTXO to the user
@@ -611,7 +635,6 @@ impl StablecoinMintCircuit {
 mod tests {
     use super::*;
     use plonky2::field::types::Field;
-    use plonky2::plonk::config::GenericConfig;
     use rand::Rng;
 
     #[test]

@@ -78,7 +78,7 @@ pub struct BitcoinTransactionOutput {
 /// Manager for burn proofs and withdrawals
 pub struct BurnManager {
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Database path for storing burn proofs and withdrawals
     db_path: String,
@@ -90,13 +90,13 @@ pub struct BurnManager {
     withdrawals: HashMap<String, BitcoinWithdrawal>,
 
     /// Bitcoin RPC URL
-    bitcoin_rpc_url: String,
+    _bitcoin_rpc_url: String,
 
     /// Bitcoin RPC username
-    bitcoin_rpc_username: String,
+    _bitcoin_rpc_username: String,
 
     /// Bitcoin RPC password
-    bitcoin_rpc_password: String,
+    _bitcoin_rpc_password: String,
 }
 
 impl BurnManager {
@@ -109,13 +109,13 @@ impl BurnManager {
         bitcoin_rpc_password: String,
     ) -> MPCResult<Self> {
         let mut manager = Self {
-            mpc_core,
+            _mpc_core: mpc_core,
             db_path: db_path.clone(),
             burn_proofs: HashMap::new(),
             withdrawals: HashMap::new(),
-            bitcoin_rpc_url,
-            bitcoin_rpc_username,
-            bitcoin_rpc_password,
+            _bitcoin_rpc_url: bitcoin_rpc_url,
+            _bitcoin_rpc_username: bitcoin_rpc_username,
+            _bitcoin_rpc_password: bitcoin_rpc_password,
         };
 
         // Load burn proofs and withdrawals from database if it exists

@@ -391,6 +391,12 @@ impl NativeAssetMintCircuit {
         Ok(())
     }
 
+    /// Builds a complete circuit for native asset minting.
+    /// 
+    /// This method creates a full circuit with virtual targets for all inputs,
+    /// which can be used for testing or as a template for creating specialized circuits.
+    /// Currently not used in production code but kept for future extensibility.
+    #[allow(dead_code)]
     fn build_circuit(
         &self,
     ) -> WireResult<(

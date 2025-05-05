@@ -7,8 +7,7 @@ use plonky2::iop::target::Target;
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 
 use crate::utils::hash::{
-    compute_nullifier, compute_nullifier_targets, compute_utxo_commitment,
-    compute_utxo_commitment_targets,
+    compute_nullifier, compute_utxo_commitment, compute_utxo_commitment_targets,
 };
 
 /// A UTXO (Unspent Transaction Output)

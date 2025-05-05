@@ -3,32 +3,27 @@ use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
 use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
 use crate::circuits::pool_state::{LPShareTarget, PoolStateTarget};
-use crate::core::proof::{deserialize_proof, serialize_proof, SerializableProof};
+use crate::core::proof::{deserialize_proof, SerializableProof};
 use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
-use crate::errors::{ProofError, WireError, WireResult};
+use crate::errors::{WireError, WireResult};
 use crate::gadgets::arithmetic;
-use crate::gadgets::fixed_point::{
-    fixed_abs, fixed_div, fixed_in_range, fixed_mul, FIXED_POINT_SCALING_FACTOR,
-};
-use crate::gadgets::{hash_n, verify_message_signature};
+use crate::gadgets::fixed_point::{fixed_abs, fixed_div, fixed_in_range, fixed_mul};
+use crate::gadgets::verify_message_signature;
 use crate::utils::compare::compare_vectors;
 use crate::utils::nullifier::{
     calculate_and_register_circuit_nullifier, compute_utxo_commitment_hash,
-    compute_utxo_nullifier_target, UTXOTarget as NullifierUTXOTarget,
+    UTXOTarget as NullifierUTXOTarget,
 };
 
-// Domain separation constant for remove liquidity signatures
-const DOMAIN_REMOVE_LIQUIDITY_SIGNATURE: [u8; 32] = [
-    0x52, 0x65, 0x6d, 0x6f, 0x76, 0x65, 0x4c, 0x69, 0x71, 0x75, 0x69, 0x64, 0x69, 0x74, 0x79, 0x53,
-    0x69, 0x67, 0x6e, 0x61, 0x74, 0x75, 0x72, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x53, 0x70,
-];
+// Domain separator for remove liquidity signature
+const DOMAIN_REMOVE_LIQUIDITY_SIGNATURE: u64 = 10;
 
 /// Circuit for removing liquidity from a CPMM pool
 #[derive(Clone)]
@@ -59,22 +54,21 @@ impl RemoveLiquidityCircuit {
         builder: &mut CircuitBuilder<F, D>,
     ) -> (Target, UTXOTarget, UTXOTarget, PoolStateTarget) {
         // Verify the user owns the LP share
-        let message = [
-            // Include the LP share details in the message to ensure ownership
-            self.lp_share.owner.clone(),
-            self.lp_share.pool_id.clone(),
-            vec![self.lp_share.amount],
-            // Include the remove liquidity parameters
-            vec![self.min_amount_a],
-            vec![self.min_amount_b],
-            // Include the pool ID to prevent cross-pool attacks
-            self.current_pool_state.pool_id.clone(),
-        ]
-        .concat();
+        let message = vec![
+            self.lp_share.owner[0],
+            self.lp_share.owner[1],
+            self.lp_share.pool_id[0],
+            self.lp_share.amount,
+            self.min_amount_a,
+            self.min_amount_b,
+        ];
 
-        // Add domain separation for remove liquidity operations
-        let domain_separated_message = hash_n(builder, &message, DOMAIN_REMOVE_LIQUIDITY_SIGNATURE);
+        // Create a domain-separated message by prepending the domain
+        let mut domain_separated_message =
+            vec![builder.constant(F::from_canonical_u64(DOMAIN_REMOVE_LIQUIDITY_SIGNATURE))];
+        domain_separated_message.extend_from_slice(&message);
 
+        // Verify the signature on the message
         verify_message_signature(
             builder,
             &domain_separated_message,
@@ -120,11 +114,14 @@ impl RemoveLiquidityCircuit {
             builder,
             self.lp_share.amount,
             self.current_pool_state.total_lp_shares,
-        );
+        )
+        .expect("Failed to calculate lp_ratio");
 
         // Calculate the token amounts to return
-        let amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA);
-        let amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB);
+        let amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA)
+            .expect("Failed to calculate amount_a");
+        let amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB)
+            .expect("Failed to calculate amount_b");
 
         // Ensure the output amounts are at least the minimum requested
         let sufficient_a = arithmetic::gte(builder, amount_a, self.min_amount_a);
@@ -161,11 +158,11 @@ impl RemoveLiquidityCircuit {
         // Add explicit value conservation checks
         // 1. Verify that new_reserve_a = current_reserve_a - amount_a
         let expected_new_reserve_a = builder.sub(self.current_pool_state.reserveA, amount_a);
-        builder.assert_equal(new_reserve_a, expected_new_reserve_a);
+        builder.connect(new_reserve_a, expected_new_reserve_a);
 
         // 2. Verify that new_reserve_b = current_reserve_b - amount_b
         let expected_new_reserve_b = builder.sub(self.current_pool_state.reserveB, amount_b);
-        builder.assert_equal(new_reserve_b, expected_new_reserve_b);
+        builder.connect(new_reserve_b, expected_new_reserve_b);
 
         // 3. Verify that the LP tokens burned match the reduction in total_lp_shares
         let expected_new_total_lp_shares = builder.sub(
@@ -176,7 +173,7 @@ impl RemoveLiquidityCircuit {
             self.current_pool_state.total_lp_shares,
             self.lp_share.amount,
         );
-        builder.assert_equal(new_total_lp_shares, expected_new_total_lp_shares);
+        builder.connect(new_total_lp_shares, expected_new_total_lp_shares);
 
         // 4. Verify that the output amounts are proportional to the LP tokens burned
         // The ratio of tokens received should equal the ratio of LP tokens burned to total LP shares
@@ -186,19 +183,24 @@ impl RemoveLiquidityCircuit {
             builder,
             self.lp_share.amount,
             self.current_pool_state.total_lp_shares,
-        );
-        let expected_amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA);
-        let expected_amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB);
+        )
+        .expect("Failed to calculate lp_ratio");
+        let expected_amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA)
+            .expect("Failed to calculate expected_amount_a");
+        let expected_amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB)
+            .expect("Failed to calculate expected_amount_b");
 
         // Allow for a small rounding error due to fixed-point arithmetic
         let epsilon = builder.constant(F::from_canonical_u64(1)); // Small tolerance
 
         // Verify that the actual output amounts are close to the expected amounts
-        let diff_a = fixed_abs(builder, builder.sub(amount_a, expected_amount_a));
+        let sub_result_a = builder.sub(amount_a, expected_amount_a);
+        let diff_a = fixed_abs(builder, sub_result_a);
         let amount_a_valid = arithmetic::lte(builder, diff_a, epsilon);
         builder.assert_one(amount_a_valid);
 
-        let diff_b = fixed_abs(builder, builder.sub(amount_b, expected_amount_b));
+        let sub_result_b = builder.sub(amount_b, expected_amount_b);
+        let diff_b = fixed_abs(builder, sub_result_b);
         let amount_b_valid = arithmetic::lte(builder, diff_b, epsilon);
         builder.assert_one(amount_b_valid);
 
@@ -208,21 +210,25 @@ impl RemoveLiquidityCircuit {
             builder,
             self.current_pool_state.reserveA,
             self.current_pool_state.reserveB,
-        );
-        let new_product = fixed_mul(builder, new_reserve_a, new_reserve_b);
+        )
+        .expect("Failed to calculate old product");
+        let new_product = fixed_mul(builder, new_reserve_a, new_reserve_b)
+            .expect("Failed to calculate new product");
 
         // Calculate the ratio of products
-        let product_ratio = fixed_div(builder, new_product, old_product);
+        let product_ratio = fixed_div(builder, new_product, old_product)
+            .expect("Failed to calculate product ratio");
 
         // The ratio should be close to 1 (allowing for rounding errors)
         let one = builder.one();
-        let product_ratio_diff = fixed_abs(builder, builder.sub(product_ratio, one));
+        let sub_result = builder.sub(product_ratio, one);
+        let product_ratio_diff = fixed_abs(builder, sub_result);
 
         // Use a slightly larger epsilon for product comparison due to compounding of rounding errors
         let product_epsilon = builder.constant(F::from_canonical_u64(2));
-        let product_valid =
-            fixed_in_range(builder, product_ratio_diff, builder.zero(), product_epsilon);
-        builder.assert_one(product_valid);
+        let zero = builder.zero();
+        let product_valid_bool = fixed_in_range(builder, product_ratio_diff, zero, product_epsilon);
+        builder.assert_one(product_valid_bool);
 
         // Set the new total LP shares
         builder.connect(new_pool_state.total_lp_shares, new_total_lp_shares);
@@ -308,7 +314,7 @@ impl RemoveLiquidityCircuit {
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
 
         // Create the circuit
-        let circuit = RemoveLiquidityCircuit {
+        let _circuit = RemoveLiquidityCircuit {
             lp_share,
             current_pool_state,
             min_amount_a,
@@ -319,7 +325,7 @@ impl RemoveLiquidityCircuit {
 
         // Build the circuit
         let (_lp_share_nullifier, _output_utxo_a, _output_utxo_b, _new_pool_state) =
-            circuit.build(&mut builder);
+            _circuit.build(&mut builder);
 
         // Make the output UTXO commitments public
         let nullifier_utxo_a = NullifierUTXOTarget {
@@ -575,7 +581,8 @@ impl RemoveLiquidityCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::plonk::config::GenericConfig;
+    use plonky2::field::types::Field;
+    use plonky2::plonk::circuit_data::CircuitConfig;
     use rand::Rng;
 
     #[test]
@@ -705,7 +712,7 @@ mod tests {
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
 
         // Create the circuit with unrealistically high minimum token amounts
-        let circuit = RemoveLiquidityCircuit {
+        let _circuit = RemoveLiquidityCircuit {
             lp_share,
             current_pool_state,
             min_amount_a,
@@ -954,7 +961,7 @@ mod tests {
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
 
         // Create the circuit with unrealistically high minimum token amounts
-        let circuit = RemoveLiquidityCircuit {
+        let _circuit = RemoveLiquidityCircuit {
             lp_share,
             current_pool_state,
             min_amount_a,

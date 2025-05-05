@@ -95,7 +95,7 @@ pub enum FeeConsolidationStatus {
 /// Manager for fee consolidation
 pub struct FeeManager {
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Database path for storing fee UTXOs and consolidations
     db_path: String,
@@ -126,7 +126,7 @@ impl FeeManager {
         max_consolidation_utxos: usize,
     ) -> MPCResult<Self> {
         let mut manager = Self {
-            mpc_core,
+            _mpc_core: mpc_core,
             db_path: db_path.clone(),
             fee_reservoir_address,
             utxos: HashMap::new(),

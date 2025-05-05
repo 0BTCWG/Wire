@@ -6,7 +6,7 @@
 use plonky2::field::extension::Extendable;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 /// Target representation of a virtual state in the CPMM
 #[derive(Debug, Clone)]
@@ -61,47 +61,56 @@ pub struct VirtualState<F: RichField> {
     /// The asset ID of token B
     pub token_b_id: F,
 
-    /// The virtual reserve of token A
+    /// The reserve of token A
     pub token_a_reserve: F,
 
-    /// The virtual reserve of token B
+    /// The reserve of token B
     pub token_b_reserve: F,
 
-    /// The constant product value (k = x * y)
+    /// The k value (product of reserves)
     pub k_value: F,
 
-    /// Timestamp of the last transition to actual pool state
+    /// The timestamp of the last transition
     pub last_transition_timestamp: F,
 }
 
 /// Native representation of an actual pool state in the CPMM
 #[derive(Debug, Clone, Serialize)]
 pub struct PoolState<F: RichField> {
+    /// The pool ID
+    pub pool_id: F,
+
     /// The asset ID of token A
     pub token_a_id: F,
 
     /// The asset ID of token B
     pub token_b_id: F,
 
-    /// The actual reserve of token A
+    /// The reserve of token A
     pub token_a_reserve: F,
 
-    /// The actual reserve of token B
+    /// The reserve of token B
     pub token_b_reserve: F,
 
-    /// The operator's public key X coordinate
+    /// The total LP shares
+    pub total_lp_shares: F,
+
+    /// The operator's public key x-coordinate
     pub operator_pk_x: F,
 
-    /// The operator's public key Y coordinate
+    /// The operator's public key y-coordinate
     pub operator_pk_y: F,
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> VirtualState<F> {
+impl<F: RichField> VirtualState<F> {
     /// Convert a native VirtualState to a VirtualStateTarget
-    pub fn to_target(
+    pub fn to_target<const D: usize>(
         &self,
         builder: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>,
-    ) -> VirtualStateTarget {
+    ) -> VirtualStateTarget
+    where
+        F: Extendable<D>,
+    {
         VirtualStateTarget {
             token_a_id: builder.constant(self.token_a_id),
             token_b_id: builder.constant(self.token_b_id),
@@ -113,12 +122,15 @@ impl<F: RichField + Extendable<D>, const D: usize> VirtualState<F> {
     }
 }
 
-impl<F: RichField + Extendable<D>, const D: usize> PoolState<F> {
+impl<F: RichField> PoolState<F> {
     /// Convert a native PoolState to a PoolStateTarget
-    pub fn to_target(
+    pub fn to_target<const D: usize>(
         &self,
         builder: &mut plonky2::plonk::circuit_builder::CircuitBuilder<F, D>,
-    ) -> PoolStateTarget {
+    ) -> PoolStateTarget
+    where
+        F: Extendable<D>,
+    {
         PoolStateTarget {
             token_a_id: builder.constant(self.token_a_id),
             token_b_id: builder.constant(self.token_b_id),
@@ -136,6 +148,7 @@ mod tests {
     use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::plonk::circuit_builder::CircuitBuilder;
     use plonky2::plonk::circuit_data::CircuitConfig;
+    use plonky2_field::types::Field;
 
     type F = GoldilocksField;
     const D: usize = 2;
@@ -166,10 +179,12 @@ mod tests {
         let mut builder = CircuitBuilder::<F, D>::new(config);
 
         let pool_state = PoolState {
+            pool_id: F::from_canonical_u64(1),
             token_a_id: F::from_canonical_u64(1),
             token_b_id: F::from_canonical_u64(2),
             token_a_reserve: F::from_canonical_u64(1000),
             token_b_reserve: F::from_canonical_u64(2000),
+            total_lp_shares: F::from_canonical_u64(3000),
             operator_pk_x: F::from_canonical_u64(1234),
             operator_pk_y: F::from_canonical_u64(5678),
         };

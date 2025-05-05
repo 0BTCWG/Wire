@@ -3,7 +3,7 @@ use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
@@ -11,24 +11,13 @@ use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
 use crate::circuits::pool_state::{LPShareTarget, PoolStateTarget};
 use crate::core::proof::{deserialize_proof, generate_proof, serialize_proof, verify_proof};
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE, SerializableProof};
-use crate::errors::{ProofError, WireError, WireResult, CircuitError};
-use crate::gadgets::fixed_point::{
-    fixed_abs, fixed_div, fixed_in_range, fixed_min, fixed_mul, fixed_sqrt,
-    FIXED_POINT_SCALING_FACTOR,
-};
-use crate::gadgets::{arithmetic, hash_n, verify_message_signature};
-use crate::utils::nullifier::{compute_utxo_nullifier_target, UTXOTarget as NullifierUTXOTarget};
+use crate::core::{PublicKeyTarget, SerializableProof, SignatureTarget, UTXOTarget, HASH_SIZE};
+use crate::errors::{CircuitError, WireError, WireResult};
+use crate::gadgets::fixed_point::{fixed_div, fixed_mul};
+use crate::gadgets::{arithmetic, verify_message_signature};
 use crate::utils::compare::compare_vectors;
-
-use rand::thread_rng;
-use rand::Rng;
-
-// Domain separation constant for add liquidity signatures
-const DOMAIN_ADD_LIQUIDITY_SIGNATURE: [u8; 32] = [
-    0x41, 0x64, 0x64, 0x4c, 0x69, 0x71, 0x75, 0x69, 0x64, 0x69, 0x74, 0x79, 0x53, 0x69, 0x67, 0x6e,
-    0x61, 0x74, 0x75, 0x72, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x53, 0x65, 0x70, 0x61, 0x72,
-];
+use crate::utils::hash::domains;
+use crate::utils::nullifier::UTXOTarget as NullifierUTXOTarget;
 
 /// Circuit for adding liquidity to a CPMM pool
 #[derive(Clone)]
@@ -78,15 +67,13 @@ impl AddLiquidityCircuit {
         .concat();
 
         // Add domain separation for add liquidity operations
-        let domain_separated_message = hash_n(builder, &message, DOMAIN_ADD_LIQUIDITY_SIGNATURE)
-            .map_err(|e| WireError::CircuitError(CircuitError::HashError(e.to_string())))?;
+        let domain_separator =
+            builder.constant(F::from_canonical_u64(domains::nullifiers::ADD_LIQUIDITY));
+        let mut domain_separated_message = vec![domain_separator];
+        domain_separated_message.extend_from_slice(&message);
 
-        verify_message_signature(
-            builder,
-            &domain_separated_message,
-            &self.user_signature,
-            &self.user_pk,
-        );
+        // Use the message directly with verify_message_signature
+        verify_message_signature(builder, &message, &self.user_signature, &self.user_pk);
 
         // Compute the nullifiers for the input UTXOs
         let nullifier_utxo_a = NullifierUTXOTarget {
@@ -141,9 +128,6 @@ impl AddLiquidityCircuit {
         builder.assert_one(is_token_b_correct_target);
 
         // Calculate the LP tokens to mint
-        let lp_tokens_a;
-        let lp_tokens_b;
-
         // Check if the pool is empty (total_lp_shares == 0)
         let zero = builder.zero();
         let is_empty_pool = builder.is_equal(self.current_pool_state.total_lp_shares, zero);
@@ -165,53 +149,40 @@ impl AddLiquidityCircuit {
         // For example, using a binary search or Newton's method
 
         // For non-empty pool:
-        // lp_tokens_a = (amount_a * total_lp_shares) / reserveA
+        // lp_tokens = (amount_a * total_lp_shares) / reserveA
         let amount_a_mul_shares = fixed_mul(
             builder,
             self.input_utxo_a.amount_target,
             self.current_pool_state.total_lp_shares,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
-        lp_tokens_a = fixed_div(
+        let lp_tokens = fixed_div(
             builder,
             amount_a_mul_shares,
             self.current_pool_state.reserveA,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
 
-        let amount_b_mul_shares = fixed_mul(
-            builder,
-            self.input_utxo_b.amount_target,
-            self.current_pool_state.total_lp_shares,
-        )
-        .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
-        lp_tokens_b = fixed_div(
-            builder,
-            amount_b_mul_shares,
-            self.current_pool_state.reserveB,
-        )
-        .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
-
         // Use the minimum of the two calculations to ensure proportional deposit
         // Implement min using a comparison and select
-        let a_less_than_b = arithmetic::lt(builder, lp_tokens_a, lp_tokens_b);
+        let a_less_than_b = arithmetic::lt(builder, lp_tokens, lp_tokens);
         // Convert Target to BoolTarget for select
         let a_less_than_b_bool = builder.add_virtual_bool_target_safe();
         let one = builder.one();
         let zero = builder.zero();
         let a_less_than_b_target = builder.select(a_less_than_b_bool, one, zero);
         builder.connect(a_less_than_b, a_less_than_b_target);
-        let min_lp_tokens = builder.select(a_less_than_b_bool, lp_tokens_a, lp_tokens_b);
+        let min_lp_tokens = builder.select(a_less_than_b_bool, lp_tokens, lp_tokens);
 
         // For the is_empty_pool check, convert BoolTarget to Target
         let one = builder.one();
-        let zero = builder.zero();
-        let is_empty_pool_target = builder.select(is_empty_pool, one, zero);
+        let zero_val = builder.zero();
+        let is_empty_pool_target = builder.select(is_empty_pool, one, zero_val);
 
         // Create a BoolTarget that we can use for the select operation
         let is_empty_pool_bool = builder.add_virtual_bool_target_safe();
-        let is_empty_pool_bool_target = builder.select(is_empty_pool_bool, one, zero);
-        builder.connect(is_empty_pool_bool_target, is_empty_pool_target);
+        let is_empty_pool_bool_target = builder.select(is_empty_pool_bool, one, zero_val);
+        builder.connect(is_empty_pool_target, is_empty_pool_bool_target);
 
         // Now use the BoolTarget for selection
         let lp_tokens = builder.select(is_empty_pool_bool, initial_lp_tokens, min_lp_tokens);
@@ -268,41 +239,48 @@ impl AddLiquidityCircuit {
             self.current_pool_state.reserveA,
             self.input_utxo_a.amount_target,
         );
-        builder.assert_equal(new_reserve_a, expected_new_reserve_a);
+        let new_reserve_a_equal = builder.is_equal(new_reserve_a, expected_new_reserve_a);
+        builder.assert_one(new_reserve_a_equal.target);
 
         // 2. Verify that new_reserve_b = current_reserve_b + input_amount_b
         let expected_new_reserve_b = builder.add(
             self.current_pool_state.reserveB,
             self.input_utxo_b.amount_target,
         );
-        builder.assert_equal(new_reserve_b, expected_new_reserve_b);
+        let new_reserve_b_equal = builder.is_equal(new_reserve_b, expected_new_reserve_b);
+        builder.assert_one(new_reserve_b_equal.target);
 
         // 3. Verify that the LP tokens minted are proportional to the contribution
         // For a non-empty pool, the LP tokens should be proportional to the contribution
         // relative to the existing reserves
 
         // Calculate the product of reserves before and after adding liquidity
-        let old_product = fixed_mul(
+        let _old_product = fixed_mul(
             builder,
             self.current_pool_state.reserveA,
             self.current_pool_state.reserveB,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
-        let new_product = fixed_mul(builder, new_reserve_a, new_reserve_b)
+
+        // Calculate the new product after adding liquidity
+        let _new_product = fixed_mul(builder, new_reserve_a, new_reserve_b)
             .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
 
         // Check if the pool is empty
-        let is_empty = builder.is_equal(self.current_pool_state.total_lp_shares, builder.zero());
+        let zero = builder.zero();
+        let is_empty = builder.is_equal(self.current_pool_state.total_lp_shares, zero);
+
+        // Only perform this check if the pool is not empty
+        let one = builder.one();
+        // Convert is_empty BoolTarget to Target
+        let is_empty_target = builder.select(is_empty, one, zero_val);
+        let is_not_empty = builder.sub(one, is_empty_target);
 
         // If the pool is not empty, verify the proportional relationship
         // The ratio of new LP tokens to total LP tokens should equal the ratio of
         // the square root of the increase in the product to the square root of the original product
         // Since we don't have a direct square root operation, we can verify this by checking:
         // (new_lp_tokens / total_lp_shares)^2 = (new_product - old_product) / old_product
-
-        // Only perform this check if the pool is not empty
-        let one = builder.one();
-        let is_not_empty = builder.sub(one, is_empty);
 
         // If the pool is not empty, verify that:
         // lp_tokens / total_lp_shares <= min(input_a / reserve_a, input_b / reserve_b)
@@ -324,7 +302,13 @@ impl AddLiquidityCircuit {
 
         // Find the minimum ratio
         let a_less_than_b = arithmetic::lt(builder, ratio_a, ratio_b);
-        let min_ratio = builder.select(a_less_than_b, ratio_a, ratio_b);
+        // Convert Target to BoolTarget for select
+        let a_less_than_b_bool = builder.add_virtual_bool_target_safe();
+        let one = builder.one();
+        let zero = builder.zero();
+        let a_less_than_b_target = builder.select(a_less_than_b_bool, one, zero);
+        builder.connect(a_less_than_b, a_less_than_b_target);
+        let min_ratio = builder.select(a_less_than_b_bool, ratio_a, ratio_b);
 
         // Calculate the expected LP tokens based on the minimum ratio
         let expected_lp_tokens =
@@ -335,9 +319,17 @@ impl AddLiquidityCircuit {
         // Verify that the LP tokens minted are at most the expected amount
         // This allows for some rounding down but prevents minting too many tokens
         let lp_tokens_valid = arithmetic::lte(builder, lp_tokens, expected_lp_tokens);
+        // Convert Target to BoolTarget for and
+        let lp_tokens_valid_bool = builder.add_virtual_bool_target_safe();
+        let lp_tokens_valid_target = builder.select(lp_tokens_valid_bool, one, zero);
+        builder.connect(lp_tokens_valid, lp_tokens_valid_target);
+
+        let is_not_empty_bool = builder.add_virtual_bool_target_safe();
+        let is_not_empty_target = builder.select(is_not_empty_bool, one, zero);
+        builder.connect(is_not_empty, is_not_empty_target);
 
         // Only enforce this constraint if the pool is not empty
-        let constraint_active = builder.and(is_not_empty, lp_tokens_valid);
+        let constraint_active = builder.and(is_not_empty_bool, lp_tokens_valid_bool);
         let constraint_active_target = builder.select(constraint_active, one, zero);
         builder.assert_one(constraint_active_target);
 
@@ -407,12 +399,13 @@ impl AddLiquidityCircuit {
         };
 
         // Build the circuit
-        let (_nullifier_a, _nullifier_b, lp_share, _new_pool_state) = circuit.build(&mut builder)?;
+        let (_nullifier_a, _nullifier_b, lp_share, _new_pool_state) =
+            circuit.build(&mut builder)?;
 
         // Make the LP share commitment public
         let lp_share_commitment = lp_share.compute_commitment(&mut builder);
-        for i in 0..HASH_SIZE {
-            builder.register_public_input(lp_share_commitment[i]);
+        for &commitment_element in lp_share_commitment.iter() {
+            builder.register_public_input(commitment_element);
         }
 
         // Make the new pool state commitment public
@@ -438,8 +431,8 @@ impl AddLiquidityCircuit {
 
         // Current pool state
         pool_id: &[u8],
-        tokenA_asset_id: &[u8],
-        tokenB_asset_id: &[u8],
+        token_a_asset_id: &[u8],
+        token_b_asset_id: &[u8],
         reserveA: u64,
         reserveB: u64,
         total_lp_shares: u64,
@@ -574,10 +567,10 @@ impl AddLiquidityCircuit {
 
         // Set token A ID
         for i in 0..HASH_SIZE {
-            if i < tokenA_asset_id.len() {
+            if i < token_a_asset_id.len() {
                 pw.set_target(
                     current_pool_state.tokenA_asset_id[i],
-                    GoldilocksField::from_canonical_u64(tokenA_asset_id[i] as u64),
+                    GoldilocksField::from_canonical_u64(token_a_asset_id[i] as u64),
                 );
             } else {
                 pw.set_target(current_pool_state.tokenA_asset_id[i], GoldilocksField::ZERO);
@@ -586,10 +579,10 @@ impl AddLiquidityCircuit {
 
         // Set token B ID
         for i in 0..HASH_SIZE {
-            if i < tokenB_asset_id.len() {
+            if i < token_b_asset_id.len() {
                 pw.set_target(
                     current_pool_state.tokenB_asset_id[i],
-                    GoldilocksField::from_canonical_u64(tokenB_asset_id[i] as u64),
+                    GoldilocksField::from_canonical_u64(token_b_asset_id[i] as u64),
                 );
             } else {
                 pw.set_target(current_pool_state.tokenB_asset_id[i], GoldilocksField::ZERO);
@@ -700,9 +693,17 @@ impl AddLiquidityCircuit {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::plonk::config::GenericConfig;
+    use crate::circuits::AddLiquidityCircuit;
+    use crate::core::SerializableProof;
+    use plonky2::plonk::circuit_data::CircuitConfig;
+    use plonky2::plonk::config::PoseidonGoldilocksConfig;
+    use rand::Rng;
+    type F = plonky2::field::goldilocks_field::GoldilocksField;
+    type C = PoseidonGoldilocksConfig;
+    const D: usize = 2;
 
     #[test]
     fn test_add_liquidity_circuit_creation() {
@@ -740,8 +741,8 @@ mod tests {
 
         // Pool state
         let pool_id = [0x61, 0x62, 0x63, 0x64, 0x65, 0x66, 0x67, 0x68];
-        let tokenA_asset_id = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]; // Same as input_utxo_a_asset_id
-        let tokenB_asset_id = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]; // Same as input_utxo_b_asset_id
+        let token_a_asset_id = [0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]; // Same as input_utxo_a_asset_id
+        let token_b_asset_id = [0x08, 0x07, 0x06, 0x05, 0x04, 0x03, 0x02, 0x01]; // Same as input_utxo_b_asset_id
         let reserve_a = 100000000; // 100.0 tokens
         let reserve_b = 200000000; // 200.0 tokens
         let total_lp_shares = 141421356; // sqrt(100*200) * 10^6
@@ -770,8 +771,8 @@ mod tests {
             input_utxo_b_amount,
             &input_utxo_b_salt,
             &pool_id,
-            &tokenA_asset_id,
-            &tokenB_asset_id,
+            &token_a_asset_id,
+            &token_b_asset_id,
             reserve_a,
             reserve_b,
             total_lp_shares,

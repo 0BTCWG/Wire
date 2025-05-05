@@ -1,18 +1,10 @@
 // Pool State Circuit for the 0BTC Wire system
 use plonky2::field::extension::Extendable;
-use plonky2::field::goldilocks_field::GoldilocksField;
-use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
 use plonky2::iop::target::Target;
-use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
-use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
-use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use crate::core::proof::{serialize_proof, SerializableProof};
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget, HASH_SIZE};
-use crate::errors::{ProofError, WireError, WireResult};
-use crate::gadgets::{calculate_nullifier, verify_message_signature};
+use crate::core::HASH_SIZE;
 
 /// Represents a liquidity pool state
 #[derive(Clone)]

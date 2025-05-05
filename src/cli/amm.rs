@@ -99,29 +99,25 @@ pub fn swap_tokens(
     let pool_state: Value = serde_json::from_str(&pool_state_data)
         .map_err(|e| format!("Failed to parse pool state: {}", e))?;
 
-    // Parse the output asset ID
-    let output_asset_id = u64::from_str_radix(output_asset_id, 16)
-        .map_err(|e| format!("Invalid output asset ID: {}", e))?;
-
     info!(
         "Swapping tokens in pool {}",
         pool_state["pool_id"].as_str().unwrap_or("unknown")
     );
 
     // Extract UTXO values
-    let commitment = hex::decode(input_utxo["commitment"].as_str().unwrap_or(""))
+    let _commitment = hex::decode(input_utxo["commitment"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid commitment: {}", e))?;
-    let nullifier = hex::decode(input_utxo["nullifier"].as_str().unwrap_or(""))
+    let _nullifier = hex::decode(input_utxo["nullifier"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid nullifier: {}", e))?;
     let asset_id_str = input_utxo["asset_id"].as_str().unwrap_or("");
     let asset_id =
         u64::from_str_radix(asset_id_str, 16).map_err(|e| format!("Invalid asset ID: {}", e))?;
     let amount = input_utxo["amount"].as_u64().unwrap_or(0);
-    let owner = hex::decode(input_utxo["owner"].as_str().unwrap_or(""))
+    let _owner = hex::decode(input_utxo["owner"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid owner: {}", e))?;
 
     // Extract pool state values
-    let pool_id = hex::decode(pool_state["pool_id"].as_str().unwrap_or(""))
+    let _pool_id = hex::decode(pool_state["pool_id"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid pool ID: {}", e))?;
     let token_a_asset_id_str = pool_state["token_a_asset_id"].as_str().unwrap_or("");
     let token_a_asset_id = u64::from_str_radix(token_a_asset_id_str, 16)
@@ -158,16 +154,16 @@ pub fn swap_tokens(
     }
 
     // Convert output asset ID to bytes
-    let output_asset_id_bytes = output_asset_id.to_be_bytes().to_vec();
+    let _output_asset_id_bytes = output_asset_id.to_be_bytes().to_vec();
 
     // Example user public key values
-    let user_pk_x = 12345;
-    let user_pk_y = 67890;
+    let _user_pk_x = 12345;
+    let _user_pk_y = 67890;
 
     // Example signature values
-    let signature_r_x = 11111;
-    let signature_r_y = 22222;
-    let signature_s = 33333;
+    let _signature_r_x = 11111;
+    let _signature_r_y = 22222;
+    let _signature_s = 33333;
 
     // Generate the proof
     // In a real implementation, this would call SwapCircuit::generate_proof

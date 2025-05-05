@@ -485,15 +485,16 @@ pub fn count_batch_signature_verification_gates<F: RichField + Extendable<D>, co
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::errors::{CircuitError, WireError, WireResult};
+    use crate::errors::CircuitError;
     use plonky2::field::goldilocks_field::GoldilocksField;
+    use plonky2::field::types::Field;
     use plonky2::iop::witness::PartialWitness;
     use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
     type F = GoldilocksField;
-    type C = PoseidonGoldilocksConfig;
     const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
 
     #[test]
     fn test_verify_message_signature() -> WireResult<()> {

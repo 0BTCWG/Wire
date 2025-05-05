@@ -83,8 +83,7 @@ impl NativeAssetBurnCircuit {
 
         // Convert is_valid to BoolTarget
         let is_valid_bool = builder.add_virtual_bool_target_safe();
-        let is_valid_target = bool_to_target(builder, is_valid_bool);
-        let _is_valid_connected = builder.connect(is_valid, is_valid_target);
+        builder.connect(is_valid, bool_to_target(builder, is_valid_bool));
         let is_valid_selected = builder.select(is_valid_bool, one, zero);
         builder.assert_one(is_valid_selected);
 
@@ -421,11 +420,12 @@ impl NativeAssetBurnCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::PointTarget;
     use plonky2::field::goldilocks_field::GoldilocksField;
-    use plonky2::plonk::circuit_builder::CircuitBuilder;
-    use plonky2::plonk::circuit_data::CircuitConfig;
     use plonky2::plonk::config::PoseidonGoldilocksConfig;
+
+    type F = GoldilocksField;
+    const D: usize = 2;
+    type C = PoseidonGoldilocksConfig;
 
     #[test]
     fn test_native_asset_burn() -> Result<(), Box<dyn std::error::Error>> {

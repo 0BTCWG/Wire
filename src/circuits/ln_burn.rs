@@ -375,9 +375,8 @@ impl LNBurnCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use plonky2::field::types::Field;
-    use plonky2::plonk::config::GenericConfig;
-    use std::time::SystemTime;
+    use crate::core::SerializableProof;
+    use plonky2::plonk::circuit_data::CircuitConfig;
 
     #[test]
     fn test_ln_burn_circuit_creation() {
@@ -393,7 +392,7 @@ mod tests {
         let input_utxo_amount = 10000000; // 10.0 tokens
         let input_utxo_asset_id = vec![0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18]; // wBTC asset ID
         let input_utxo_owner = vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11];
-        let input_utxo_salt = vec![0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28];
+        let _input_utxo_salt = vec![0x21, 0x22, 0x23, 0x24, 0x25, 0x26, 0x27, 0x28];
 
         // LN payment details
         let payment_hash = vec![0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38];

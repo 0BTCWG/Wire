@@ -1,17 +1,14 @@
 // Stablecoin MPC module for the 0BTC Wire system
 use chrono::{DateTime, Utc};
-use log::{error, info, warn};
 use rand::Rng;
 use serde::{Deserialize, Serialize};
-use std::fs::{self, File};
 use std::io::{Read, Write};
-use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::core::proof::SerializableProof;
 use crate::errors::{WireError, WireResult};
 use crate::mpc::core::MPCCore;
-use crate::mpc::{MPCConfig, MPCError};
+use crate::mpc::MPCConfig;
 
 /// Represents a price attestation from the MPC operators
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -104,9 +101,9 @@ impl StablecoinMPC {
         redeem_attestations_dir: &str,
     ) -> Self {
         // Create directories if they don't exist
-        fs::create_dir_all(price_attestations_dir).unwrap_or_default();
-        fs::create_dir_all(redeem_requests_dir).unwrap_or_default();
-        fs::create_dir_all(redeem_attestations_dir).unwrap_or_default();
+        std::fs::create_dir_all(price_attestations_dir).unwrap_or_default();
+        std::fs::create_dir_all(redeem_requests_dir).unwrap_or_default();
+        std::fs::create_dir_all(redeem_attestations_dir).unwrap_or_default();
 
         Self {
             price_attestations_dir: price_attestations_dir.to_string(),
@@ -157,7 +154,7 @@ impl StablecoinMPC {
             .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         let mut file =
-            File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
+            std::fs::File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
 
         file.write_all(json.as_bytes())
             .map_err(|e| WireError::GenericError(e.to_string()))?;
@@ -171,7 +168,7 @@ impl StablecoinMPC {
         let mut latest_attestation = None;
 
         // Read all attestations and find the latest one
-        let entries = fs::read_dir(&self.price_attestations_dir)
+        let entries = std::fs::read_dir(&self.price_attestations_dir)
             .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         for entry in entries {
@@ -179,8 +176,8 @@ impl StablecoinMPC {
             let path = entry.path();
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
-                let mut file =
-                    File::open(&path).map_err(|e| WireError::GenericError(e.to_string()))?;
+                let mut file = std::fs::File::open(&path)
+                    .map_err(|e| WireError::GenericError(e.to_string()))?;
 
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)
@@ -236,7 +233,7 @@ impl StablecoinMPC {
             .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         let mut file =
-            File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
+            std::fs::File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
 
         file.write_all(json.as_bytes())
             .map_err(|e| WireError::GenericError(e.to_string()))?;
@@ -250,8 +247,8 @@ impl StablecoinMPC {
     /// and proper signatures. For now, we'll use a mock implementation.
     pub fn process_redeem_request(&self, request_path: &str) -> WireResult<RedeemAttestation> {
         // Read the request
-        let mut file =
-            File::open(request_path).map_err(|e| WireError::GenericError(e.to_string()))?;
+        let mut file = std::fs::File::open(request_path)
+            .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         let mut contents = String::new();
         file.read_to_string(&mut contents)
@@ -296,7 +293,7 @@ impl StablecoinMPC {
             .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         let mut file =
-            File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
+            std::fs::File::create(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
 
         file.write_all(json.as_bytes())
             .map_err(|e| WireError::GenericError(e.to_string()))?;
@@ -316,7 +313,8 @@ impl StablecoinMPC {
             self.redeem_attestations_dir, user_pkh_hex, timestamp
         );
 
-        let mut file = File::open(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
+        let mut file =
+            std::fs::File::open(&filename).map_err(|e| WireError::GenericError(e.to_string()))?;
 
         let mut contents = String::new();
         file.read_to_string(&mut contents)
@@ -332,7 +330,7 @@ impl StablecoinMPC {
     pub fn list_pending_redeem_requests(&self) -> WireResult<Vec<RedeemRequest>> {
         let mut requests = Vec::new();
 
-        let entries = fs::read_dir(&self.redeem_requests_dir)
+        let entries = std::fs::read_dir(&self.redeem_requests_dir)
             .map_err(|e| WireError::GenericError(e.to_string()))?;
 
         for entry in entries {
@@ -340,8 +338,8 @@ impl StablecoinMPC {
             let path = entry.path();
 
             if path.is_file() && path.extension().map_or(false, |ext| ext == "json") {
-                let mut file =
-                    File::open(&path).map_err(|e| WireError::GenericError(e.to_string()))?;
+                let mut file = std::fs::File::open(&path)
+                    .map_err(|e| WireError::GenericError(e.to_string()))?;
 
                 let mut contents = String::new();
                 file.read_to_string(&mut contents)
@@ -413,7 +411,7 @@ impl StablecoinMintMPC {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            btc_usd_price: 50000,
+            btc_usd_price: 50_000,
             signature,
         })
     }
@@ -459,7 +457,7 @@ impl StablecoinRedeemMPC {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
-            zusd_amount: 1000_000_000,
+            zusd_amount: 1_000_000_000,
             user_pkh: vec![1, 2, 3, 4, 5],
             signature,
         })
@@ -469,10 +467,7 @@ impl StablecoinRedeemMPC {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::proof::SerializableProof;
     use crate::mpc::MPCConfig;
-    use std::fs;
-    use std::path::Path;
     use tempfile::tempdir;
 
     #[test]
@@ -525,7 +520,7 @@ mod tests {
 
         // Generate a user PKH
         let user_pkh = vec![1, 2, 3, 4, 5];
-        let zusd_amount = 1000_000_000; // 1000 zUSD
+        let zusd_amount = 1_000_000_000; // 1000 zUSD
 
         // Submit a redeem request
         let _request = mpc.submit_redeem_request(&user_pkh, zusd_amount).unwrap();

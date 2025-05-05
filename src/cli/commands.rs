@@ -24,7 +24,7 @@ pub struct CommandOptions {
 pub fn execute_config_command(
     subcommand: &str,
     config_path: &Path,
-    options: &CommandOptions,
+    _options: &CommandOptions,
 ) -> WireResult<()> {
     match subcommand {
         "init" => {

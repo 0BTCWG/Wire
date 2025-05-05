@@ -1,35 +1,27 @@
 // Swap Circuit for the 0BTC Wire system
+use crate::WireResult;
 use plonky2::field::extension::Extendable;
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
 use plonky2::hash::hash_types::RichField;
-use plonky2::iop::target::{BoolTarget, Target};
+use plonky2::iop::target::Target;
 use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::{CircuitConfig, CircuitData};
-use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
-use rand::{thread_rng, Rng};
+use plonky2::plonk::config::PoseidonGoldilocksConfig;
 
-use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
+use crate::core::proof::{deserialize_proof, SerializableProof};
 use crate::core::virtual_cpmm::PoolStateTarget;
-use crate::core::proof::{deserialize_proof, serialize_proof, SerializableProof};
 use crate::core::HASH_SIZE;
-use crate::errors::{CircuitError, ProofError, WireError, WireResult};
+use crate::core::{PublicKeyTarget, SignatureTarget, UTXOTarget};
+use crate::errors::WireError;
 use crate::gadgets::arithmetic::{gte, lte};
-use crate::gadgets::fixed_point::{
-    fixed_abs, fixed_div, fixed_in_range, fixed_min, fixed_mul, fixed_sqrt,
-    FIXED_POINT_SCALING_FACTOR,
-};
-use crate::gadgets::{hash_n, verify_message_signature};
+use crate::gadgets::fixed_point::{fixed_abs, fixed_div, fixed_mul, FIXED_POINT_SCALING_FACTOR};
+use crate::gadgets::hash_n;
+use crate::gadgets::signature::verify_message_signature;
 use crate::utils::compare::compare_vectors;
-use crate::utils::nullifier::{
-    compute_utxo_commitment_hash, compute_utxo_nullifier_target, UTXOTarget as NullifierUTXOTarget,
-};
-
-const DOMAIN_SIGNATURE: [u8; 32] = [
-    0x53, 0x77, 0x61, 0x70, 0x43, 0x69, 0x72, 0x63, 0x75, 0x69, 0x74, 0x53, 0x69, 0x67, 0x6e, 0x61,
-    0x74, 0x75, 0x72, 0x65, 0x44, 0x6f, 0x6d, 0x61, 0x69, 0x6e, 0x53, 0x65, 0x70, 0x61, 0x72, 0x61,
-];
+use crate::utils::hash::domains::nullifiers::SWAP;
+use crate::utils::nullifier::{compute_utxo_commitment_hash, UTXOTarget as NullifierUTXOTarget};
 
 /// Circuit for swapping tokens in a CPMM pool
 #[derive(Clone)]
@@ -72,7 +64,7 @@ impl SwapCircuit {
 
         // Add domain separation for swap operations
         let domain_separated_message_target = hash_n(builder, &message);
-        
+
         // Convert the Target to a Vec<Target> for verify_message_signature
         let domain_separated_message = vec![domain_separated_message_target];
 
@@ -96,7 +88,7 @@ impl SwapCircuit {
         let nullifier = crate::utils::nullifier::calculate_and_register_circuit_nullifier(
             builder,
             &nullifier_utxo,
-            crate::utils::hash::domains::nullifiers::SWAP,
+            SWAP,
         );
 
         // Note: The nullifier is already registered as a public input by calculate_and_register_circuit_nullifier
@@ -184,7 +176,7 @@ impl SwapCircuit {
         // This is a simplified calculation and would need more careful implementation
         // in a real circuit to handle division correctly
         let new_output_reserve_result = fixed_div(builder, k, new_input_reserve);
-        
+
         // Since fixed_div returns a Result, we need to handle it
         // In a real implementation, we would handle errors properly
         // For now, we'll just use a dummy value if there's an error
@@ -206,64 +198,67 @@ impl SwapCircuit {
         // 2. The output amount must equal the decrease in the output reserve
 
         // Calculate the expected new input reserve
-        let expected_new_input_reserve = builder.add(input_reserve, self.input_utxo.amount_target);
+        let _expected_new_input_reserve = builder.add(input_reserve, self.input_utxo.amount_target);
 
         // Verify that the actual new input reserve matches the expected value
         let new_input_reserve = builder.sub(input_reserve, self.input_utxo.amount_target);
-        let expected_new_input_reserve = builder.add(self.input_utxo.amount_target, self.input_utxo.amount_target);
-        let reserves_match = builder.is_equal(new_input_reserve, expected_new_input_reserve);
+        let _expected_new_input_reserve =
+            builder.add(self.input_utxo.amount_target, self.input_utxo.amount_target);
+        let reserves_match = builder.is_equal(new_input_reserve, _expected_new_input_reserve);
         let one = builder.one();
         let zero = builder.zero();
         let reserves_match_target = builder.select(reserves_match, one, zero);
         builder.assert_one(reserves_match_target);
 
         // Calculate the expected new output reserve
-        let expected_new_output_reserve = builder.sub(output_reserve, output_amount);
+        let _expected_new_output_reserve = builder.sub(output_reserve, output_amount);
 
         // Verify that the actual new output reserve matches the expected value
         let new_output_reserve = builder.add(output_reserve, output_amount);
-        let expected_new_output_reserve = builder.sub(self.input_utxo.amount_target, output_amount);
-        let output_reserves_match = builder.is_equal(new_output_reserve, expected_new_output_reserve);
+        let _expected_new_output_reserve =
+            builder.sub(self.input_utxo.amount_target, output_amount);
+        let output_reserves_match =
+            builder.is_equal(new_output_reserve, _expected_new_output_reserve);
         let output_reserves_match_target = builder.select(output_reserves_match, one, zero);
         builder.assert_one(output_reserves_match_target);
 
         // Verify the constant product formula: new_input_reserve * new_output_reserve = k
         // This is the core invariant of the CPMM (Constant Product Market Maker)
-        let product_before = builder.mul(input_reserve, output_reserve);
-        let product_after = fixed_mul(builder, new_input_reserve, new_output_reserve).unwrap();
+        let _product_before = builder.mul(input_reserve, output_reserve);
+        let _product_after = fixed_mul(builder, new_input_reserve, new_output_reserve).unwrap();
 
-        let product_diff = builder.sub(product_after, product_before);
-        
+        let product_diff = builder.sub(_product_after, _product_before);
+
         // Use fixed_abs to get the absolute difference
         let product_diff_abs = fixed_abs(builder, product_diff);
-        
+
         // Allow for a small epsilon due to rounding errors
         let epsilon = builder.constant(F::from_canonical_u64(FIXED_POINT_SCALING_FACTOR / 1000)); // 0.001 in fixed-point
-        
+
         // Create a zero constant for the min value
-        let zero_target = builder.zero();
-        
+        let _zero_target = builder.zero();
+
         // Check if the product difference is within the acceptable range
         let product_valid_bool = builder.add_virtual_bool_target_safe();
         builder.assert_bool(product_valid_bool);
-        
+
         // Compute the is_equal result
         let product_valid = lte(builder, product_diff_abs, epsilon);
-        
+
         // Connect the BoolTarget to the lte result
         let product_valid_bool_as_target = builder.select(product_valid_bool, one, zero);
-        
+
         // Convert product_valid (Target) to a BoolTarget for select
         let product_valid_as_bool = builder.add_virtual_bool_target_safe();
         builder.assert_bool(product_valid_as_bool);
-        
+
         // Connect the new BoolTarget to the product_valid result
         let product_valid_as_bool_target = builder.select(product_valid_as_bool, one, zero);
         builder.connect(product_valid_as_bool_target, product_valid);
-        
+
         // Now connect the original BoolTarget to the new one
         builder.connect(product_valid_bool_as_target, product_valid_as_bool_target);
-        
+
         // Convert BoolTarget to Target for assertion
         let product_valid_target = builder.select(product_valid_bool, one, zero);
         builder.assert_one(product_valid_target);
@@ -279,8 +274,14 @@ impl SwapCircuit {
         };
 
         // Copy the token IDs
-        builder.connect(new_pool_state.token_a_id, self.current_pool_state.token_a_id);
-        builder.connect(new_pool_state.token_b_id, self.current_pool_state.token_b_id);
+        builder.connect(
+            new_pool_state.token_a_id,
+            self.current_pool_state.token_a_id,
+        );
+        builder.connect(
+            new_pool_state.token_b_id,
+            self.current_pool_state.token_b_id,
+        );
 
         // Set the new reserves
         let one = builder.one();
@@ -393,7 +394,7 @@ impl SwapCircuit {
         };
 
         // Build the circuit
-        let (_nullifier, output_utxo, _, new_pool_state) = circuit.build(&mut builder)?;
+        let (_nullifier, output_utxo, _, _new_pool_state) = circuit.build(&mut builder)?;
 
         // Make the output UTXO commitment public
         let nullifier_output_utxo = NullifierUTXOTarget {
@@ -446,12 +447,12 @@ impl SwapCircuit {
 
         for i in 0..HASH_SIZE {
             if i < input_utxo_owner_pubkey_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_owner_pubkey_hash[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
@@ -460,16 +461,16 @@ impl SwapCircuit {
 
         for i in 0..HASH_SIZE {
             if i < input_utxo_salt.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.salt_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_salt[i] as u64),
                 );
             } else {
-                pw.set_target(input_utxo.salt_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(input_utxo.salt_target[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo.amount_target,
             GoldilocksField::from_canonical_u64(input_utxo_amount),
         );
@@ -485,31 +486,31 @@ impl SwapCircuit {
 
         for i in 0..HASH_SIZE {
             if i < token_a_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     current_pool_state.token_a_id,
                     GoldilocksField::from_canonical_u64(token_a_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.token_a_id, GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_a_id, GoldilocksField::ZERO);
             }
         }
 
         for i in 0..HASH_SIZE {
             if i < token_b_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     current_pool_state.token_b_id,
                     GoldilocksField::from_canonical_u64(token_b_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.token_b_id, GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_b_id, GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.token_a_reserve,
             GoldilocksField::from_canonical_u64(reserve_a),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.token_b_reserve,
             GoldilocksField::from_canonical_u64(reserve_b),
         );
@@ -519,41 +520,41 @@ impl SwapCircuit {
             .collect();
         for i in 0..HASH_SIZE {
             if i < output_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     output_asset_id_targets[i],
                     GoldilocksField::from_canonical_u64(output_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(output_asset_id_targets[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(output_asset_id_targets[i], GoldilocksField::ZERO);
             }
         }
 
         let min_output_amount_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             min_output_amount_target,
             GoldilocksField::from_canonical_u64(min_output_amount),
         );
 
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.x,
             GoldilocksField::from_canonical_u64(user_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.y,
             GoldilocksField::from_canonical_u64(user_pk_y),
         );
 
         let user_signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );
@@ -599,8 +600,9 @@ impl SwapCircuit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use plonky2::field::goldilocks_field::GoldilocksField;
     use plonky2::field::types::Field;
-    use plonky2::plonk::config::GenericConfig;
+    use rand::thread_rng;
     use rand::Rng;
 
     #[test]
@@ -630,7 +632,7 @@ mod tests {
 
     #[test]
     fn test_swap_proof_generation_and_verification_with_real_proof() {
-        let input_utxo_hash = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
+        let _input_utxo_hash = vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08];
         let input_utxo_amount = 10000000; // 10M
         let input_utxo_asset_id = vec![0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x18];
         let input_utxo_owner = vec![0xaa, 0xbb, 0xcc, 0xdd, 0xee, 0xff, 0x00, 0x11];
@@ -725,7 +727,12 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
 
-        let input_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
+        let input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: vec![builder.add_virtual_target(); 32],
+            asset_id_target: vec![builder.add_virtual_target(); 32],
+            amount_target: builder.add_virtual_target(),
+            salt_target: vec![builder.add_virtual_target(); 32],
+        };
 
         let input_amount = builder.constant(GoldilocksField::from_canonical_u64(1000000)); // 1M
         builder.connect(input_utxo.amount_target, input_amount);
@@ -775,9 +782,14 @@ mod tests {
 
         let (_, _, _, new_pool_state) = circuit.build(&mut builder).unwrap();
 
-        let product_before = builder.mul(reserve_a, reserve_b);
+        let _product_before = builder.mul(reserve_a, reserve_b);
 
-        let product_after = fixed_mul(builder, new_pool_state.token_a_reserve, new_pool_state.token_b_reserve).unwrap();
+        let _product_after = fixed_mul(
+            &mut builder,
+            new_pool_state.token_a_reserve,
+            new_pool_state.token_b_reserve,
+        )
+        .unwrap();
 
         assert!(builder.num_gates() > 0, "Circuit should have constraints");
     }
@@ -787,48 +799,12 @@ mod tests {
         let config = CircuitConfig::standard_recursion_config();
         let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
 
-        let input_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
-
-        let current_pool_state = PoolStateTarget {
-            token_a_id: builder.add_virtual_target(),
-            token_b_id: builder.add_virtual_target(),
-            token_a_reserve: builder.add_virtual_target(),
-            token_b_reserve: builder.add_virtual_target(),
-            operator_pk_x: builder.add_virtual_target(),
-            operator_pk_y: builder.add_virtual_target(),
+        let input_utxo = UTXOTarget {
+            owner_pubkey_hash_target: vec![builder.add_virtual_target(); 32],
+            asset_id_target: vec![builder.add_virtual_target(); 32],
+            amount_target: builder.add_virtual_target(),
+            salt_target: vec![builder.add_virtual_target(); 32],
         };
-
-        let reserve_a = builder.constant(GoldilocksField::from_canonical_u64(10000000)); // 10M
-        let reserve_b = builder.constant(GoldilocksField::from_canonical_u64(20000000)); // 20M
-
-        builder.connect(current_pool_state.token_a_reserve, reserve_a);
-        builder.connect(current_pool_state.token_b_reserve, reserve_b);
-
-        let output_asset_id = (0..HASH_SIZE)
-            .map(|_| builder.add_virtual_target())
-            .collect();
-
-        let input_amount = builder.constant(GoldilocksField::from_canonical_u64(1000000)); // 1M
-        builder.connect(input_utxo.amount_target, input_amount);
-
-        let min_output_amount = builder.constant(GoldilocksField::from_canonical_u64(5000000)); // 5M
-
-        let user_signature = SignatureTarget::add_virtual(&mut builder);
-        let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-
-        let circuit = SwapCircuit {
-            input_utxo,
-            current_pool_state,
-            output_asset_id,
-            min_output_amount,
-            user_signature,
-            user_pk,
-        };
-
-        let config = CircuitConfig::standard_recursion_config();
-        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
-
-        let input_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
 
         let current_pool_state = PoolStateTarget {
             token_a_id: builder.add_virtual_target(),

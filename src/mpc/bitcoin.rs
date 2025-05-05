@@ -99,16 +99,16 @@ pub enum WithdrawalStatus {
 /// Monitor for Bitcoin deposits
 pub struct DepositMonitor {
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Bitcoin RPC URL
-    bitcoin_rpc_url: String,
+    _bitcoin_rpc_url: String,
 
     /// Bitcoin RPC username
-    bitcoin_rpc_username: String,
+    _bitcoin_rpc_username: String,
 
     /// Bitcoin RPC password
-    bitcoin_rpc_password: String,
+    _bitcoin_rpc_password: String,
 
     /// Required confirmations for deposits
     required_confirmations: u32,
@@ -127,10 +127,10 @@ impl DepositMonitor {
         required_confirmations: u32,
     ) -> Self {
         Self {
-            mpc_core,
-            bitcoin_rpc_url,
-            bitcoin_rpc_username,
-            bitcoin_rpc_password,
+            _mpc_core: mpc_core,
+            _bitcoin_rpc_url: bitcoin_rpc_url,
+            _bitcoin_rpc_username: bitcoin_rpc_username,
+            _bitcoin_rpc_password: bitcoin_rpc_password,
             required_confirmations,
             deposits: HashMap::new(),
         }
@@ -186,16 +186,16 @@ impl DepositMonitor {
 /// Processor for Bitcoin withdrawals
 pub struct WithdrawalProcessor {
     /// MPC core for cryptographic operations
-    mpc_core: MPCCore,
+    _mpc_core: MPCCore,
 
     /// Bitcoin RPC URL
-    bitcoin_rpc_url: String,
+    _bitcoin_rpc_url: String,
 
     /// Bitcoin RPC username
-    bitcoin_rpc_username: String,
+    _bitcoin_rpc_username: String,
 
     /// Bitcoin RPC password
-    bitcoin_rpc_password: String,
+    _bitcoin_rpc_password: String,
 
     /// Withdrawals being processed
     withdrawals: HashMap<String, BitcoinWithdrawal>,
@@ -210,10 +210,10 @@ impl WithdrawalProcessor {
         bitcoin_rpc_password: String,
     ) -> Self {
         Self {
-            mpc_core,
-            bitcoin_rpc_url,
-            bitcoin_rpc_username,
-            bitcoin_rpc_password,
+            _mpc_core: mpc_core,
+            _bitcoin_rpc_url: bitcoin_rpc_url,
+            _bitcoin_rpc_username: bitcoin_rpc_username,
+            _bitcoin_rpc_password: bitcoin_rpc_password,
             withdrawals: HashMap::new(),
         }
     }

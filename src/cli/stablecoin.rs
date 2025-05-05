@@ -120,19 +120,19 @@ pub fn mint_zusd(
         .map_err(|e| format!("Failed to parse price attestation JSON: {}", e))?;
 
     // Get the current timestamp
-    let current_timestamp = SystemTime::now()
+    let _current_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("Failed to get current timestamp: {}", e))?
         .as_secs();
 
     // Set a time window of 1 hour (3600 seconds)
-    let time_window = 3600;
+    let _time_window = 3600;
 
     // Set the overcollateralization ratio to 150% (1.5 * 10^6)
     let overcollateralization_ratio = 1_500_000;
 
     // Extract values from the input UTXO
-    let input_utxo_commitment = input_utxo_data["commitment"]
+    let _input_utxo_commitment = input_utxo_data["commitment"]
         .as_str()
         .ok_or_else(|| "Missing commitment in input UTXO".to_string())?;
 
@@ -140,11 +140,11 @@ pub fn mint_zusd(
         .as_str()
         .ok_or_else(|| "Missing nullifier in input UTXO".to_string())?;
 
-    let input_utxo_asset_id = input_utxo_data["asset_id"]
+    let _input_utxo_asset_id = input_utxo_data["asset_id"]
         .as_u64()
         .ok_or_else(|| "Missing asset_id in input UTXO".to_string())?;
 
-    let input_utxo_amount = input_utxo_data["amount"]
+    let _input_utxo_amount = input_utxo_data["amount"]
         .as_u64()
         .ok_or_else(|| "Missing amount in input UTXO".to_string())?;
 
@@ -191,7 +191,7 @@ pub fn mint_zusd(
         },
         "nullifier": input_utxo_nullifier,
         "locked_collateral": {
-            "asset_id": input_utxo_asset_id,
+            "asset_id": 1, // WBTC_ASSET_ID
             "amount": required_wbtc,
             "owner": "mpc_operator"
         },
@@ -201,8 +201,8 @@ pub fn mint_zusd(
             "owner": input_utxo_owner
         },
         "change_utxo": {
-            "asset_id": input_utxo_asset_id,
-            "amount": input_utxo_amount - required_wbtc,
+            "asset_id": 1, // WBTC_ASSET_ID
+            "amount": _input_utxo_amount - required_wbtc,
             "owner": input_utxo_owner
         },
         "price_attestation": {
@@ -387,16 +387,16 @@ pub fn redeem_zusd(
         .map_err(|e| format!("Failed to parse redeem attestation JSON: {}", e))?;
 
     // Get the current timestamp
-    let current_timestamp = SystemTime::now()
+    let _current_timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("Failed to get current timestamp: {}", e))?
         .as_secs();
 
     // Set a time window of 1 hour (3600 seconds)
-    let time_window = 3600;
+    let _time_window = 3600;
 
     // Extract values from the input UTXO
-    let input_utxo_commitment = input_utxo_data["commitment"]
+    let _input_utxo_commitment = input_utxo_data["commitment"]
         .as_str()
         .ok_or_else(|| "Missing commitment in input UTXO".to_string())?;
 
@@ -404,11 +404,11 @@ pub fn redeem_zusd(
         .as_str()
         .ok_or_else(|| "Missing nullifier in input UTXO".to_string())?;
 
-    let input_utxo_asset_id = input_utxo_data["asset_id"]
+    let _input_utxo_asset_id = input_utxo_data["asset_id"]
         .as_u64()
         .ok_or_else(|| "Missing asset_id in input UTXO".to_string())?;
 
-    let input_utxo_amount = input_utxo_data["amount"]
+    let _input_utxo_amount = input_utxo_data["amount"]
         .as_u64()
         .ok_or_else(|| "Missing amount in input UTXO".to_string())?;
 

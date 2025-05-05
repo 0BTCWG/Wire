@@ -289,29 +289,29 @@ impl WrappedAssetBurnCircuit {
         let mut pw = PartialWitness::new();
 
         // Set the witness values
-        pw.set_target(
+        let _ = pw.set_target(
             sender_sk_target,
             GoldilocksField::from_canonical_u64(sender_sk),
         );
 
-        pw.set_target(
+        let _ = pw.set_target(
             sender_pk_target.point.x,
             GoldilocksField::from_canonical_u64(sender_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             sender_pk_target.point.y,
             GoldilocksField::from_canonical_u64(sender_pk_y),
         );
 
-        pw.set_target(
+        let _ = pw.set_target(
             signature_target.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature_target.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature_target.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );
@@ -320,7 +320,7 @@ impl WrappedAssetBurnCircuit {
             .len()
             .min(input_utxo_target.owner_pubkey_hash_target.len())
         {
-            pw.set_target(
+            let _ = pw.set_target(
                 input_utxo_target.owner_pubkey_hash_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_owner_pubkey_hash[i] as u64),
             );
@@ -330,13 +330,13 @@ impl WrappedAssetBurnCircuit {
             .len()
             .min(input_utxo_target.asset_id_target.len())
         {
-            pw.set_target(
+            let _ = pw.set_target(
                 input_utxo_target.asset_id_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_asset_id[i] as u64),
             );
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo_target.amount_target,
             GoldilocksField::from_canonical_u64(input_utxo_amount),
         );
@@ -345,7 +345,7 @@ impl WrappedAssetBurnCircuit {
             .len()
             .min(input_utxo_target.salt_target.len())
         {
-            pw.set_target(
+            let _ = pw.set_target(
                 input_utxo_target.salt_target[i],
                 GoldilocksField::from_canonical_u64(input_utxo_salt[i] as u64),
             );
@@ -355,7 +355,7 @@ impl WrappedAssetBurnCircuit {
             .len()
             .min(destination_btc_address_target.len())
         {
-            pw.set_target(
+            let _ = pw.set_target(
                 destination_btc_address_target[i],
                 GoldilocksField::from_canonical_u64(destination_btc_address[i] as u64),
             );
@@ -383,33 +383,33 @@ impl WrappedAssetBurnCircuit {
             custodian_pk_x,
             custodian_pk_y,
         ) {
-            pw.set_target(
+            let _ = pw.set_target(
                 fee_quote.fee_btc,
                 GoldilocksField::from_canonical_u64(fee_btc_val),
             );
-            pw.set_target(
+            let _ = pw.set_target(
                 fee_quote.expiry,
                 GoldilocksField::from_canonical_u64(fee_expiry_val),
             );
 
-            pw.set_target(
+            let _ = pw.set_target(
                 fee_quote.signature.r_point.x,
                 GoldilocksField::from_canonical_u64(fee_sig_r_x),
             );
-            pw.set_target(
+            let _ = pw.set_target(
                 fee_quote.signature.r_point.y,
                 GoldilocksField::from_canonical_u64(fee_sig_r_y),
             );
-            pw.set_target(
+            let _ = pw.set_target(
                 fee_quote.signature.s_scalar,
                 GoldilocksField::from_canonical_u64(fee_sig_s),
             );
 
-            pw.set_target(
+            let _ = pw.set_target(
                 custodian_pk.point.x,
                 GoldilocksField::from_canonical_u64(cust_pk_x),
             );
-            pw.set_target(
+            let _ = pw.set_target(
                 custodian_pk.point.y,
                 GoldilocksField::from_canonical_u64(cust_pk_y),
             );

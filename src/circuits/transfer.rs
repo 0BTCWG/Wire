@@ -53,7 +53,12 @@ pub struct TransferCircuit {
 }
 
 impl TransferCircuit {
-    /// Helper function to create a UTXOTarget with the correct type parameters
+    /// Helper function to create a UTXOTarget with the correct type parameters.
+    /// 
+    /// This utility method creates a new UTXOTarget with virtual targets for all fields.
+    /// It's currently not used in production code but kept for future extensibility
+    /// and potential testing scenarios.
+    #[allow(dead_code)]
     fn create_utxo_target(builder: &mut CircuitBuilder<GoldilocksField, 2>) -> UTXOTarget {
         UTXOTarget {
             owner_pubkey_hash_target: (0..HASH_SIZE)
@@ -310,7 +315,7 @@ impl TransferCircuit {
             for i in 0..HASH_SIZE {
                 let asset_id_match = builder.is_equal(
                     self.input_utxos[0].asset_id_target[i],
-                    change_utxo.asset_id_target[i]
+                    change_utxo.asset_id_target[i],
                 );
                 let one = builder.one();
                 let zero = builder.zero();
@@ -511,21 +516,21 @@ impl TransferCircuit {
             // Set the targets in the witness
             for j in 0..HASH_SIZE {
                 if j < owner_pubkey_hash.len() {
-                    pw.set_target(
+                    let _ = pw.set_target(
                         circuit.input_utxos[i].owner_pubkey_hash_target[j],
                         GoldilocksField::from_canonical_u64(owner_pubkey_hash[j] as u64),
                     );
                 }
 
                 if j < asset_id.len() {
-                    pw.set_target(
+                    let _ = pw.set_target(
                         circuit.input_utxos[i].asset_id_target[j],
                         GoldilocksField::from_canonical_u64(asset_id[j] as u64),
                     );
                 }
 
                 if j < salt.len() {
-                    pw.set_target(
+                    let _ = pw.set_target(
                         circuit.input_utxos[i].salt_target[j],
                         GoldilocksField::from_canonical_u64(salt[j] as u64),
                     );
@@ -533,7 +538,7 @@ impl TransferCircuit {
             }
 
             // Set the amount target
-            pw.set_target(
+            let _ = pw.set_target(
                 circuit.input_utxos[i].amount_target,
                 GoldilocksField::from_canonical_u64(amount),
             );
@@ -549,7 +554,7 @@ impl TransferCircuit {
 
             for j in 0..HASH_SIZE {
                 if j < recipient_pk_hash.len() {
-                    pw.set_target(
+                    let _ = pw.set_target(
                         circuit.recipient_pk_hashes[i][j],
                         GoldilocksField::from_canonical_u64(recipient_pk_hash[j] as u64),
                     );
@@ -565,7 +570,7 @@ impl TransferCircuit {
                 ));
             }
 
-            pw.set_target(
+            let _ = pw.set_target(
                 circuit.output_amounts[i],
                 GoldilocksField::from_canonical_u64(output_amount),
             );
@@ -605,8 +610,8 @@ impl TransferCircuit {
         ]));
 
         // Set the sender public key targets
-        pw.set_target(circuit.sender_pk.point.x, sender_pk_x);
-        pw.set_target(circuit.sender_pk.point.y, sender_pk_y);
+        let _ = pw.set_target(circuit.sender_pk.point.x, sender_pk_x);
+        let _ = pw.set_target(circuit.sender_pk.point.y, sender_pk_y);
 
         // Process sender signature
         if sender_sig.len() < 96 {
@@ -654,9 +659,9 @@ impl TransferCircuit {
         ]));
 
         // Set the signature targets
-        pw.set_target(circuit.sender_sig.r_point.x, sig_r_x);
-        pw.set_target(circuit.sender_sig.r_point.y, sig_r_y);
-        pw.set_target(circuit.sender_sig.s_scalar, sig_s);
+        let _ = pw.set_target(circuit.sender_sig.r_point.x, sig_r_x);
+        let _ = pw.set_target(circuit.sender_sig.r_point.y, sig_r_y);
+        let _ = pw.set_target(circuit.sender_sig.s_scalar, sig_s);
 
         // Process fee input UTXO
         if fee_input_utxo.len() < 4 * 32 {
@@ -686,21 +691,21 @@ impl TransferCircuit {
         // Set the fee UTXO targets
         for j in 0..HASH_SIZE {
             if j < fee_owner_pubkey_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.owner_pubkey_hash_target[j],
                     GoldilocksField::from_canonical_u64(fee_owner_pubkey_hash[j] as u64),
                 );
             }
 
             if j < fee_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.asset_id_target[j],
                     GoldilocksField::from_canonical_u64(fee_asset_id[j] as u64),
                 );
             }
 
             if j < fee_salt.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_input_utxo.salt_target[j],
                     GoldilocksField::from_canonical_u64(fee_salt[j] as u64),
                 );
@@ -708,13 +713,13 @@ impl TransferCircuit {
         }
 
         // Set the fee amount target
-        pw.set_target(
+        let _ = pw.set_target(
             circuit.fee_input_utxo.amount_target,
             GoldilocksField::from_canonical_u64(fee_amount_value),
         );
 
         // Set the fee amount target
-        pw.set_target(
+        let _ = pw.set_target(
             circuit.fee_amount,
             GoldilocksField::from_canonical_u64(fee_amount),
         );
@@ -728,7 +733,7 @@ impl TransferCircuit {
 
         for j in 0..HASH_SIZE {
             if j < fee_reservoir_address_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     circuit.fee_reservoir_address_hash[j],
                     GoldilocksField::from_canonical_u64(fee_reservoir_address_hash[j] as u64),
                 );

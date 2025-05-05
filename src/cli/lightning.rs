@@ -167,10 +167,10 @@ pub fn generate_ln_burn_proof(
     // Extract UTXO values
     let commitment = hex::decode(utxo["commitment"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid commitment: {}", e))?;
-    let nullifier = hex::decode(utxo["nullifier"].as_str().unwrap_or(""))
+    let _nullifier = hex::decode(utxo["nullifier"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid nullifier: {}", e))?;
-    let amount = utxo["amount"].as_u64().unwrap_or(0);
-    let asset_id = utxo["asset_id"].as_u64().unwrap_or(0);
+    let _amount = utxo["amount"].as_u64().unwrap_or(0);
+    let _asset_id = utxo["asset_id"].as_u64().unwrap_or(0);
     let owner = hex::decode(utxo["owner"].as_str().unwrap_or(""))
         .map_err(|e| format!("Invalid owner: {}", e))?;
     let salt = utxo["salt"].as_u64().unwrap_or(0);
@@ -188,9 +188,9 @@ pub fn generate_ln_burn_proof(
     let user_pk_y = 67890;
 
     // Example signature values
-    let user_signature_r_x = 11111;
-    let user_signature_r_y = 22222;
-    let user_signature_s = 33333;
+    let _user_signature_r_x = 11111;
+    let _user_signature_r_y = 22222;
+    let _user_signature_s = 33333;
 
     // Call the generate_ln_payment_proof function (mock implementation)
     let proof = generate_ln_payment_proof(
@@ -202,9 +202,9 @@ pub fn generate_ln_burn_proof(
         &destination_bytes,
         user_pk_x,
         user_pk_y,
-        user_signature_r_x,
-        user_signature_r_y,
-        user_signature_s,
+        _user_signature_r_x,
+        _user_signature_r_y,
+        _user_signature_s,
     );
 
     // Serialize the proof to JSON
@@ -227,11 +227,11 @@ pub fn submit_ln_burn_proof(proof_path: &str, invoice_path: &str) -> Result<(), 
     validate_file_path(invoice_path, true).map_err(|e| format!("Invalid invoice path: {}", e))?;
 
     // Read the proof file
-    let proof_data =
+    let _proof_data =
         fs::read_to_string(proof_path).map_err(|e| format!("Failed to read proof file: {}", e))?;
 
     // Read the invoice file
-    let invoice_data = fs::read_to_string(invoice_path)
+    let _invoice_data = fs::read_to_string(invoice_path)
         .map_err(|e| format!("Failed to read invoice file: {}", e))?;
 
     info!("Submitting Lightning Network burn proof to MPC operators");
@@ -247,17 +247,17 @@ pub fn submit_ln_burn_proof(proof_path: &str, invoice_path: &str) -> Result<(), 
 
 /// Generate a payment proof for a Lightning Network payment
 pub fn generate_ln_payment_proof(
-    owner: &[u8],
-    salt: u64,
-    payment_hash: &[u8],
-    amount: u64,
-    expiry: u64,
-    destination: &[u8],
-    user_pk_x: u64,
-    user_pk_y: u64,
-    signature_r_x: u64,
-    signature_r_y: u64,
-    signature_s: u64,
+    _owner: &[u8],
+    _salt: u64,
+    _payment_hash: &[u8],
+    _amount: u64,
+    _expiry: u64,
+    _destination: &[u8],
+    _user_pk_x: u64,
+    _user_pk_y: u64,
+    _signature_r_x: u64,
+    _signature_r_y: u64,
+    _signature_s: u64,
 ) -> SerializableProof {
     // In a real implementation, we would call LNMintCircuit::generate_proof
     // For now, we'll create a mock proof
