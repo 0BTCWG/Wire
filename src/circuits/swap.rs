@@ -23,6 +23,12 @@ use crate::utils::compare::compare_vectors;
 use crate::utils::hash::domains::nullifiers::SWAP;
 use crate::utils::nullifier::{compute_utxo_commitment_hash, UTXOTarget as NullifierUTXOTarget};
 
+/// LP fee percentage (0.3%)
+pub const LP_FEE_PERCENTAGE: u64 = 3000; // 0.3% = 3000 / 1_000_000
+
+/// Protocol fee percentage (20% of LP fee = 0.06%)
+pub const PROTOCOL_FEE_PERCENTAGE: u64 = 200; // 20% of LP fee = 0.06% = 600 / 1_000_000
+
 /// Circuit for swapping tokens in a CPMM pool
 #[derive(Clone)]
 pub struct SwapCircuit {
@@ -43,6 +49,9 @@ pub struct SwapCircuit {
 
     /// The user's public key
     pub user_pk: PublicKeyTarget,
+    
+    /// The protocol fee reservoir address hash
+    pub fee_reservoir_address_hash: Vec<Target>,
 }
 
 impl SwapCircuit {
@@ -149,7 +158,7 @@ impl SwapCircuit {
 
         // Calculate the swap amounts using the constant product formula (x * y = k)
         // We'll use the formula: output_amount = (output_reserve * input_amount) / (input_reserve + input_amount)
-        // For simplicity, we'll assume no fees in this implementation
+        // Apply LP fee of 0.3%
 
         // Select the input and output reserves based on which tokens are being swapped
         let input_reserve = builder.select(
@@ -169,17 +178,60 @@ impl SwapCircuit {
             self.current_pool_state.token_b_reserve,
         );
 
+        // Calculate the input amount after fee
+        // input_amount_with_fee = input_amount * (1 - fee_percentage)
+        // input_amount_with_fee = input_amount * (1_000_000 - LP_FEE_PERCENTAGE) / 1_000_000
+        let fee_factor = builder.constant(F::from_canonical_u64(1_000_000 - LP_FEE_PERCENTAGE));
+        let scaling_factor = builder.constant(F::from_canonical_u64(1_000_000));
+        
+        let input_amount_with_fee_result = fixed_mul(
+            builder,
+            self.input_utxo.amount_target,
+            fee_factor,
+        );
+        
+        let input_amount_with_fee = match input_amount_with_fee_result {
+            Ok(result) => {
+                let scaled_result = fixed_div(builder, result, scaling_factor)
+                    .unwrap_or(builder.zero()); // Handle division error
+                scaled_result
+            },
+            Err(_) => builder.zero(), // Handle multiplication error
+        };
+
+        // Calculate the total fee amount
+        let total_fee_amount = builder.sub(self.input_utxo.amount_target, input_amount_with_fee);
+        
+        // Calculate the protocol fee (20% of the LP fee)
+        let protocol_fee_factor = builder.constant(F::from_canonical_u64(PROTOCOL_FEE_PERCENTAGE));
+        let protocol_fee_result = fixed_mul(
+            builder,
+            total_fee_amount,
+            protocol_fee_factor,
+        );
+        
+        let protocol_fee_amount = match protocol_fee_result {
+            Ok(result) => {
+                let scaled_result = fixed_div(builder, result, scaling_factor)
+                    .unwrap_or(builder.zero()); // Handle division error
+                scaled_result
+            },
+            Err(_) => builder.zero(), // Handle multiplication error
+        };
+        
+        // Calculate the LP fee (total fee - protocol fee)
+        let lp_fee_amount = builder.sub(total_fee_amount, protocol_fee_amount);
+
         // Calculate the new input reserve
         let new_input_reserve = builder.add(input_reserve, self.input_utxo.amount_target);
 
-        // Calculate the new output reserve (k / new_input_reserve)
-        // This is a simplified calculation and would need more careful implementation
-        // in a real circuit to handle division correctly
-        let new_output_reserve_result = fixed_div(builder, k, new_input_reserve);
+        // Calculate the new output reserve using the constant product formula with fees
+        // k = input_reserve * output_reserve
+        // new_output_reserve = k / (input_reserve + input_amount_with_fee)
+        let input_reserve_plus_fee = builder.add(input_reserve, input_amount_with_fee);
+        let new_output_reserve_result = fixed_div(builder, k, input_reserve_plus_fee);
 
         // Since fixed_div returns a Result, we need to handle it
-        // In a real implementation, we would handle errors properly
-        // For now, we'll just use a dummy value if there's an error
         let new_output_reserve = match new_output_reserve_result {
             Ok(result) => result,
             Err(_) => builder.zero(), // This is a simplification; real code would handle errors better
@@ -322,42 +374,54 @@ impl SwapCircuit {
         // Create the output token UTXO
         let output_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
 
-        // Set the asset ID to the output asset ID
-        // Initialize output_asset_id with the correct number of elements if it's empty
-        if self.output_asset_id.len() < HASH_SIZE {
-            // If we're here, we're likely in a test and need to initialize the output_asset_id
-            // Use token B's asset ID as the output asset ID
-            for i in 0..HASH_SIZE {
-                builder.connect(
-                    output_utxo.asset_id_target[i],
-                    self.current_pool_state.token_b_id,
-                );
-            }
-        } else {
-            // Normal case where output_asset_id is properly initialized
-            for i in 0..HASH_SIZE {
-                builder.connect(output_utxo.asset_id_target[i], self.output_asset_id[i]);
-            }
-        }
-
-        // Set the amount to the output amount
-        builder.connect(output_utxo.amount_target, output_amount);
-
-        // Set the owner to the same as the input UTXO
+        // Set the output UTXO's asset ID
         for i in 0..HASH_SIZE {
             builder.connect(
-                output_utxo.owner_pubkey_hash_target[i],
-                self.input_utxo.owner_pubkey_hash_target[i],
+                output_utxo.asset_id_target[i],
+                self.output_asset_id[i],
             );
         }
 
-        // Return the nullifier, output UTXO, and new pool state
-        Ok((
-            nullifier,
-            output_utxo,
-            self.input_utxo.clone(),
-            new_pool_state,
-        ))
+        // Set the output UTXO's amount
+        builder.connect(output_utxo.amount_target, output_amount);
+
+        // Set the output UTXO's owner to the user's public key hash
+        let user_pk_hash = hash_n(builder, &[self.user_pk.point.x, self.user_pk.point.y], HASH_SIZE);
+        for i in 0..HASH_SIZE {
+            builder.connect(output_utxo.owner_pubkey_hash_target[i], user_pk_hash[i]);
+        }
+
+        // Create a random salt for the output UTXO
+        let output_salt = builder.add_virtual_target();
+        builder.connect(output_utxo.salt_target, output_salt);
+
+        // Create the protocol fee UTXO if the protocol fee is greater than zero
+        let protocol_fee_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
+        
+        // Set the protocol fee UTXO's asset ID to the input asset ID
+        for i in 0..HASH_SIZE {
+            builder.connect(
+                protocol_fee_utxo.asset_id_target[i],
+                self.input_utxo.asset_id_target[i],
+            );
+        }
+        
+        // Set the protocol fee UTXO's amount
+        builder.connect(protocol_fee_utxo.amount_target, protocol_fee_amount);
+        
+        // Set the protocol fee UTXO's owner to the fee reservoir address
+        for i in 0..HASH_SIZE {
+            builder.connect(
+                protocol_fee_utxo.owner_pubkey_hash_target[i],
+                self.fee_reservoir_address_hash[i],
+            );
+        }
+        
+        // Create a random salt for the protocol fee UTXO
+        let protocol_fee_salt = builder.add_virtual_target();
+        builder.connect(protocol_fee_utxo.salt_target, protocol_fee_salt);
+
+        Ok((output_amount, output_utxo, protocol_fee_utxo, new_pool_state))
     }
 
     /// Create and build the circuit
@@ -382,6 +446,9 @@ impl SwapCircuit {
         let min_output_amount = builder.add_virtual_target();
         let user_signature = SignatureTarget::add_virtual(&mut builder);
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let fee_reservoir_address_hash = (0..HASH_SIZE)
+            .map(|_| builder.add_virtual_target())
+            .collect();
 
         // Create the circuit
         let circuit = SwapCircuit {
@@ -391,6 +458,7 @@ impl SwapCircuit {
             min_output_amount,
             user_signature,
             user_pk,
+            fee_reservoir_address_hash,
         };
 
         // Build the circuit
@@ -435,6 +503,8 @@ impl SwapCircuit {
         signature_r_x: u64,
         signature_r_y: u64,
         signature_s: u64,
+        
+        fee_reservoir_address_hash: &[u8],
     ) -> WireResult<SerializableProof> {
         let circuit_data = Self::create_circuit()?;
 
@@ -559,6 +629,20 @@ impl SwapCircuit {
             GoldilocksField::from_canonical_u64(signature_s),
         );
 
+        let fee_reservoir_address_hash_targets: Vec<Target> = (0..HASH_SIZE)
+            .map(|_| builder.add_virtual_target())
+            .collect();
+        for i in 0..HASH_SIZE {
+            if i < fee_reservoir_address_hash.len() {
+                let _ = pw.set_target(
+                    fee_reservoir_address_hash_targets[i],
+                    GoldilocksField::from_canonical_u64(fee_reservoir_address_hash[i] as u64),
+                );
+            } else {
+                let _ = pw.set_target(fee_reservoir_address_hash_targets[i], GoldilocksField::ZERO);
+            }
+        }
+
         let circuit = SwapCircuit {
             input_utxo,
             current_pool_state,
@@ -566,6 +650,7 @@ impl SwapCircuit {
             min_output_amount: min_output_amount_target,
             user_signature,
             user_pk,
+            fee_reservoir_address_hash: fee_reservoir_address_hash_targets,
         };
 
         circuit.build(&mut builder)?;
@@ -652,6 +737,8 @@ mod tests {
         let signature_r_x = rng.gen::<u64>();
         let signature_r_y = rng.gen::<u64>();
         let signature_s = rng.gen::<u64>();
+        
+        let fee_reservoir_address_hash = vec![0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48];
 
         let result = SwapCircuit::generate_proof(
             &input_utxo_owner,
@@ -670,6 +757,7 @@ mod tests {
             signature_r_x,
             signature_r_y,
             signature_s,
+            &fee_reservoir_address_hash,
         );
 
         match result {
@@ -707,6 +795,9 @@ mod tests {
         let min_output_amount = builder.add_virtual_target();
         let user_signature = SignatureTarget::add_virtual(&mut builder);
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let fee_reservoir_address_hash = (0..HASH_SIZE)
+            .map(|_| builder.add_virtual_target())
+            .collect();
 
         let circuit = SwapCircuit {
             input_utxo,
@@ -715,6 +806,7 @@ mod tests {
             min_output_amount,
             user_signature,
             user_pk,
+            fee_reservoir_address_hash,
         };
 
         let (_, _, _, _) = circuit.build(&mut builder).unwrap();
@@ -739,10 +831,10 @@ mod tests {
 
         let token_a_id = (0..HASH_SIZE)
             .map(|_| builder.add_virtual_target())
-            .collect::<Vec<_>>();
+            .collect();
         let token_b_id = (0..HASH_SIZE)
             .map(|_| builder.add_virtual_target())
-            .collect::<Vec<_>>();
+            .collect();
 
         let current_pool_state = PoolStateTarget {
             token_a_id: builder.add_virtual_target(),
@@ -770,6 +862,9 @@ mod tests {
 
         let user_signature = SignatureTarget::add_virtual(&mut builder);
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let fee_reservoir_address_hash = (0..HASH_SIZE)
+            .map(|_| builder.constant(GoldilocksField::from_canonical_u64(0x42)))
+            .collect();
 
         let circuit = SwapCircuit {
             input_utxo,
@@ -778,6 +873,7 @@ mod tests {
             min_output_amount,
             user_signature,
             user_pk,
+            fee_reservoir_address_hash,
         };
 
         let (_, _, _, new_pool_state) = circuit.build(&mut builder).unwrap();
@@ -832,6 +928,9 @@ mod tests {
 
         let user_signature = SignatureTarget::add_virtual(&mut builder);
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
+        let fee_reservoir_address_hash = (0..HASH_SIZE)
+            .map(|_| builder.constant(GoldilocksField::from_canonical_u64(0x42)))
+            .collect();
 
         let circuit = SwapCircuit {
             input_utxo,
@@ -840,6 +939,7 @@ mod tests {
             min_output_amount,
             user_signature,
             user_pk,
+            fee_reservoir_address_hash,
         };
 
         let (_, output_utxo, _, _) = circuit.build(&mut builder).unwrap();
@@ -849,5 +949,132 @@ mod tests {
             output_utxo.amount_target != builder.zero(),
             "Output UTXO amount should not be zero"
         );
+    }
+
+    #[test]
+    fn test_swap_fee_calculations() {
+        // Set up a circuit builder
+        let config = CircuitConfig::standard_recursion_config();
+        let mut builder = CircuitBuilder::<GoldilocksField, 2>::new(config);
+
+        // Create a pool with 1,000,000 of token A and 2,000,000 of token B
+        // This gives a price of 2 B per A
+        let token_a_reserve = builder.constant(GoldilocksField::from_canonical_u64(1_000_000));
+        let token_b_reserve = builder.constant(GoldilocksField::from_canonical_u64(2_000_000));
+
+        // Create token IDs
+        let token_a_id = builder.constant(GoldilocksField::from_canonical_u64(1));
+        let token_b_id = builder.constant(GoldilocksField::from_canonical_u64(2));
+
+        // Create a pool state
+        let pool_state = PoolStateTarget {
+            token_a_id,
+            token_b_id,
+            token_a_reserve,
+            token_b_reserve,
+            operator_pk_x: builder.constant(GoldilocksField::from_canonical_u64(0)),
+            operator_pk_y: builder.constant(GoldilocksField::from_canonical_u64(0)),
+        };
+
+        // Create an input UTXO with 100,000 of token A
+        let input_amount = 100_000;
+        let input_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
+        builder.connect(
+            input_utxo.amount_target,
+            builder.constant(GoldilocksField::from_canonical_u64(input_amount)),
+        );
+
+        // Set the input UTXO's asset ID to token A
+        for i in 0..HASH_SIZE {
+            builder.connect(input_utxo.asset_id_target[i], token_a_id);
+        }
+
+        // Set the output asset ID to token B
+        let output_asset_id = vec![token_b_id; HASH_SIZE];
+
+        // Set a minimum output amount of 0 (we'll check the actual output)
+        let min_output_amount = builder.constant(GoldilocksField::from_canonical_u64(0));
+
+        // Create signature and public key targets
+        let user_signature = SignatureTarget::add_virtual(&mut builder);
+        let user_pk = PublicKeyTarget::add_virtual(&mut builder);
+
+        // Create fee reservoir address hash
+        let fee_reservoir_address_hash = (0..HASH_SIZE)
+            .map(|_| builder.constant(GoldilocksField::from_canonical_u64(0x42)))
+            .collect();
+
+        // Create the circuit
+        let circuit = SwapCircuit {
+            input_utxo,
+            current_pool_state: pool_state,
+            output_asset_id,
+            min_output_amount,
+            user_signature,
+            user_pk,
+            fee_reservoir_address_hash,
+        };
+
+        // Build the circuit
+        let (output_amount, _output_utxo, protocol_fee_utxo, new_pool_state) = circuit.build(&mut builder).unwrap();
+
+        // Calculate the expected values
+        // 1. Calculate the input amount after LP fee (0.3%)
+        // input_amount_with_fee = input_amount * (1 - 0.003) = 100,000 * 0.997 = 99,700
+        let expected_input_amount_with_fee = 99_700;
+
+        // 2. Calculate the expected output amount using the constant product formula
+        // new_output_reserve = (token_a_reserve * token_b_reserve) / (token_a_reserve + input_amount_with_fee)
+        // new_output_reserve = (1,000,000 * 2,000,000) / (1,000,000 + 99,700) = 2,000,000,000,000 / 1,099,700 ≈ 1,818,587
+        // output_amount = token_b_reserve - new_output_reserve = 2,000,000 - 1,818,587 = 181,413
+        let k = 1_000_000 * 2_000_000;
+        let new_output_reserve = k / (1_000_000 + expected_input_amount_with_fee);
+        let expected_output_amount = 2_000_000 - new_output_reserve;
+
+        // 3. Calculate the expected total fee amount
+        // total_fee_amount = input_amount - input_amount_with_fee = 100,000 - 99,700 = 300
+        let expected_total_fee_amount = input_amount - expected_input_amount_with_fee;
+
+        // 4. Calculate the expected protocol fee (20% of the LP fee)
+        // protocol_fee_amount = total_fee_amount * 0.2 = 300 * 0.2 = 60
+        let expected_protocol_fee_amount = (expected_total_fee_amount * PROTOCOL_FEE_PERCENTAGE) / 1_000_000;
+
+        // 5. Calculate the expected LP fee (total fee - protocol fee)
+        // lp_fee_amount = total_fee_amount - protocol_fee_amount = 300 - 60 = 240
+        let expected_lp_fee_amount = expected_total_fee_amount - expected_protocol_fee_amount;
+
+        // Verify the output amount
+        let output_amount_value = builder.get_target_as_source(output_amount);
+        assert_eq!(output_amount_value.to_canonical_u64(), expected_output_amount);
+
+        // Verify the protocol fee amount
+        let protocol_fee_amount_value = builder.get_target_as_source(protocol_fee_utxo.amount_target);
+        assert_eq!(protocol_fee_amount_value.to_canonical_u64(), expected_protocol_fee_amount);
+
+        // Verify the new pool state
+        // New token A reserve = token_a_reserve + input_amount = 1,000,000 + 100,000 = 1,100,000
+        let new_token_a_reserve_value = builder.get_target_as_source(new_pool_state.token_a_reserve);
+        assert_eq!(new_token_a_reserve_value.to_canonical_u64(), 1_000_000 + input_amount);
+
+        // New token B reserve = token_b_reserve - output_amount = 2,000,000 - expected_output_amount
+        let new_token_b_reserve_value = builder.get_target_as_source(new_pool_state.token_b_reserve);
+        assert_eq!(new_token_b_reserve_value.to_canonical_u64(), 2_000_000 - expected_output_amount);
+
+        // Verify the constant product formula with fees
+        // (token_a_reserve + input_amount_with_fee) * new_output_reserve ≈ token_a_reserve * token_b_reserve
+        // Allow for a small rounding error due to integer division
+        let left_side = (1_000_000 + expected_input_amount_with_fee) * new_output_reserve;
+        let right_side = 1_000_000 * 2_000_000;
+        let diff = if left_side > right_side { left_side - right_side } else { right_side - left_side };
+        
+        // The difference should be very small relative to the values
+        assert!(diff < 1000, "Constant product formula not maintained with fees");
+
+        println!("Input amount: {}", input_amount);
+        println!("Input amount with fee: {}", expected_input_amount_with_fee);
+        println!("Output amount: {}", expected_output_amount);
+        println!("Total fee amount: {}", expected_total_fee_amount);
+        println!("Protocol fee amount: {}", expected_protocol_fee_amount);
+        println!("LP fee amount: {}", expected_lp_fee_amount);
     }
 }

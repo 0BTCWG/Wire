@@ -30,6 +30,14 @@ pub mod stablecoin;
 pub mod workflow;
 use advanced::{execute_advanced_command, AdvancedCommands};
 
+// Import new CLI modules
+pub mod new_commands;
+pub mod amm_commands;
+pub mod stablecoin_commands;
+pub mod ico_commands;
+pub mod airdrop_commands;
+use new_commands::{ICOCommands, AirdropCommands, StablecoinV2Commands, execute_ico_command, execute_airdrop_command, execute_stablecoin_v2_command};
+
 #[derive(Parser)]
 #[command(name = "wire")]
 #[command(about = "0BTC Wire - Zero-Knowledge UTXO System", long_about = None)]
@@ -171,6 +179,24 @@ pub enum Commands {
         #[command(subcommand)]
         command: StablecoinCommands,
     },
+    /// ICO commands
+    #[command(about = "Initial Coin Offering (ICO) operations")]
+    ICO {
+        #[command(subcommand)]
+        command: ICOCommands,
+    },
+    /// Airdrop commands
+    #[command(about = "Airdrop operations")]
+    Airdrop {
+        #[command(subcommand)]
+        command: AirdropCommands,
+    },
+    /// Stablecoin V2 commands
+    #[command(about = "Stablecoin V2 operations with mixed collateral")]
+    StablecoinV2 {
+        #[command(subcommand)]
+        command: StablecoinV2Commands,
+    },
 }
 
 /// Parse command line arguments and execute the appropriate command
@@ -207,10 +233,13 @@ pub fn execute_command(command: &Cli) -> Result<(), String> {
             circuit,
             verbose,
         } => verify_aggregated_proof_cli(proof, circuit, *verbose),
-        Commands::Advanced(command) => execute_advanced_command(command),
-        Commands::AMM { command } => execute_amm_command(&command),
-        Commands::Lightning { command } => execute_lightning_command(&command),
-        Commands::Stablecoin { command } => execute_stablecoin_command(&command),
+        Commands::Advanced(advanced_command) => execute_advanced_command(advanced_command),
+        Commands::AMM { command } => execute_amm_command(command),
+        Commands::Lightning { command } => execute_lightning_command(command),
+        Commands::Stablecoin { command } => execute_stablecoin_command(command),
+        Commands::ICO { command } => execute_ico_command(command),
+        Commands::Airdrop { command } => execute_airdrop_command(command),
+        Commands::StablecoinV2 { command } => execute_stablecoin_v2_command(command),
     }
 }
 
@@ -1186,6 +1215,146 @@ pub fn execute_stablecoin_command(command: &StablecoinCommands) -> Result<(), St
             redeem_attestation,
             output,
         } => crate::cli::stablecoin::redeem_zusd(
+            input_utxo,
+            price_attestation,
+            redeem_attestation,
+            output,
+        ),
+    }
+}
+
+#[derive(Subcommand)]
+pub enum ICOCommands {
+    /// Create a new ICO
+    CreateICO {
+        /// Output file for the ICO state
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Participate in an ICO
+    Participate {
+        /// Path to the ICO state file
+        #[arg(short, long)]
+        ico_state: String,
+
+        /// Path to the input UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+
+        /// Amount of tokens to purchase
+        #[arg(short, long)]
+        amount: u64,
+
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+}
+
+pub fn execute_ico_command(command: &ICOCommands) -> Result<(), String> {
+    match command {
+        ICOCommands::CreateICO { output } => crate::cli::ico::create_ico(output),
+        ICOCommands::Participate {
+            ico_state,
+            input_utxo,
+            amount,
+            output,
+        } => crate::cli::ico::participate_in_ico(ico_state, input_utxo, *amount, output),
+    }
+}
+
+#[derive(Subcommand)]
+pub enum AirdropCommands {
+    /// Create a new airdrop
+    CreateAirdrop {
+        /// Output file for the airdrop state
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Claim an airdrop
+    Claim {
+        /// Path to the airdrop state file
+        #[arg(short, long)]
+        airdrop_state: String,
+
+        /// Path to the input UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+}
+
+pub fn execute_airdrop_command(command: &AirdropCommands) -> Result<(), String> {
+    match command {
+        AirdropCommands::CreateAirdrop { output } => crate::cli::airdrop::create_airdrop(output),
+        AirdropCommands::Claim {
+            airdrop_state,
+            input_utxo,
+            output,
+        } => crate::cli::airdrop::claim_airdrop(airdrop_state, input_utxo, output),
+    }
+}
+
+#[derive(Subcommand)]
+pub enum StablecoinV2Commands {
+    /// Mint zUSD stablecoins with mixed collateral
+    MintZUSD {
+        /// Path to the input wBTC UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+
+        /// Path to the price attestation file
+        #[arg(short, long)]
+        price_attestation: String,
+
+        /// Amount of zUSD to mint
+        #[arg(short, long)]
+        zusd_amount: u64,
+
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+
+    /// Redeem zUSD stablecoins with mixed collateral
+    RedeemZUSD {
+        /// Path to the input zUSD UTXO file
+        #[arg(short, long)]
+        input_utxo: String,
+
+        /// Path to the price attestation file
+        #[arg(short, long)]
+        price_attestation: String,
+
+        /// Path to the redeem attestation file
+        #[arg(short, long)]
+        redeem_attestation: String,
+
+        /// Output file for the result
+        #[arg(short, long)]
+        output: String,
+    },
+}
+
+pub fn execute_stablecoin_v2_command(command: &StablecoinV2Commands) -> Result<(), String> {
+    match command {
+        StablecoinV2Commands::MintZUSD {
+            input_utxo,
+            price_attestation,
+            zusd_amount,
+            output,
+        } => crate::cli::stablecoin_v2::mint_zusd(input_utxo, price_attestation, *zusd_amount, output),
+        StablecoinV2Commands::RedeemZUSD {
+            input_utxo,
+            price_attestation,
+            redeem_attestation,
+            output,
+        } => crate::cli::stablecoin_v2::redeem_zusd(
             input_utxo,
             price_attestation,
             redeem_attestation,

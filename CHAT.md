@@ -1,100 +1,124 @@
-# 0BTC Wire - Developer Task List for Production Readiness
+## Wire Developer TODO List - Feature Expansion
 
-This task list outlines key areas for review, hardening, and implementation based on the current codebase structure and potential weaknesses identified. Addressing these items will improve the system's robustness and prepare it for external auditing.
+This list outlines the development tasks required to implement the newly specified features into the Wire core library (Rust circuits, gadgets, core types, WASM bindings) and potentially associated components like the CLI.
 
-**I. Circuit Logic & Constraints:**
+**I. AMM Enhancements:**
 
-*   **[✓] Review Value Conservation:**
-    *   **Task:** Meticulously review constraints in `TransferCircuit`, AMM circuits (`SwapCircuit`, `AddLiquidityCircuit`, `RemoveLiquidityCircuit`), and Stablecoin circuits (`StablecoinMintCircuit`, `StablecoinRedeemCircuit`) to ensure the sum of output values (+ fees) strictly equals the sum of input values.
-    *   **Action:** Add explicit assertions (`builder.assert_equal`) for value balance checks.
-*   **[✓] Verify Ownership Checks:**
-    *   **Task:** Ensure signature verification (`verify_message_signature` usage) is correctly implemented in all circuits that spend UTXOs (`TransferCircuit`, `WrappedAssetBurnCircuit`, `NativeAssetBurnCircuit`, `LNBurnCircuit`, `StablecoinMintCircuit`, `StablecoinRedeemCircuit`, AMM circuits).
-    *   **Action:** Confirm the correct message is being signed and verified against the appropriate public key. Double-check domain separation usage in signature hashing.
-*   **[✓] Harden Nullifier Logic:**
-    *   **Task:** Review nullifier calculation (`compute_utxo_nullifier_target`, `calculate_and_register_nullifier`) in all spending circuits.
-    *   **Action:** Ensure nullifiers are unique per spent UTXO and are correctly registered as public inputs to prevent double-spends. Verify domain separation.
-*   **[✓] Validate State Transitions (AMM & Stablecoin):**
-    *   **Task:** Review state transition logic in AMM (`SwapCircuit`, `AddLiquidityCircuit`, `RemoveLiquidityCircuit`) and Stablecoin (`StablecoinMintCircuit`, `StablecoinRedeemCircuit`) circuits.
-    *   **Action:** Audit state update logic (reserves, LP shares, collateral, minted supply) and add explicit assertions. Confirm formulas (CPMM, bonding curve, collateral ratio) are correctly translated into constraints.
-*   **[✓] Verify Asset ID Handling:**
-    *   **Task:** Ensure all circuits correctly handle and enforce `asset_id`.
-    *   **Action:** Verify `TransferCircuit` prevents asset type changes. Check mint/burn circuits use the correct asset IDs (wBTC, zUSD, native). Add explicit equality checks for `asset_id` where necessary.
-*   **[✓] Implement/Verify Virtual CPMM Circuits:**
-    *   **Task:** If Virtual CPMM is intended for this phase, implement `BuyTokenCircuit`, `SellTokenCircuit`, and `TransitionCircuit`. If integrated differently, document and review that implementation.
-    *   **Action:** Write circuits enforcing bonding curve math and transition logic. Add corresponding tests.
-*   **[✓] Define Collateral Locking Mechanism:**
-    *   **Task:** Clearly define and document how wBTC collateral is "locked" in `StablecoinMintCircuit` (e.g., specific UTXO type, transfer to MPC pool).
-    *   **Action:** Ensure the chosen mechanism is correctly and securely implemented in the circuit constraints and corresponding redemption logic (`StablecoinRedeemCircuit`).
+*   **[✓] Implement LP Fees:**
+    *   **Task:** Modify `SwapCircuit` logic to calculate and allocate swap fees (e.g., 0.3%) to liquidity providers.
+    *   **Action:** Adjust reserve update calculations to implicitly reflect fee accrual to LPs (e.g., increase `k` slightly or adjust output amounts). Ensure fee calculations are integrated correctly within the fixed-point arithmetic. Add tests specifically for fee calculation accuracy.
+*   **[✓] Implement Protocol Fees (Optional but Specified):**
+    *   **Task:** Add logic to `SwapCircuit` to divert a fraction of the LP fee to a designated protocol address (`fee_reservoir_address_hash`).
+    *   **Action:** Introduce a configurable protocol fee percentage parameter (potentially a circuit constant or public input). Modify swap calculations to subtract the protocol fee *before* calculating the LP share or output amounts. Ensure this fee is correctly directed (e.g., implicitly added to a protocol-controlled balance or explicitly sent via a small fee UTXO - the former is simpler in UTXO models). Update tests.
+*   **[✓] Update AMM Tests:**
+    *   **Task:** Enhance existing AMM circuit tests (`add_liquidity`, `remove_liquidity`, `swap`) to verify correct fee calculations (LP and protocol fees).
+    *   **Action:** Add test cases with various swap sizes and fee scenarios. Assert correct reserve updates and output amounts considering fees.
 
-**II. Arithmetic & Gadgets:**
+**II. Stablecoin V2 (Protocol Fees & "zero" Collateral):**
 
-*   **[✓] Implement Robust Arithmetic:**
-    *   **Task:** Review all complex arithmetic in circuits (especially AMM and Stablecoin). Replace any placeholder logic (e.g., for division, square roots) with robust, verified gadget implementations.
-    *   **Action:** Implement or integrate secure fixed-point or scaled-integer arithmetic gadgets. Add thorough unit tests for these gadgets covering edge cases. Check `src/gadgets/arithmetic.rs`.
-*   **[✓] Review Gadget Usage:**
-    *   **Task:** Ensure all cryptographic gadgets (`src/gadgets/`) are used correctly according to their specifications (e.g., correct inputs, domain separation for hashes).
-    *   **Action:** Audit calls to hash, signature, merkle, and nullifier gadgets within all circuits.
+*   **(Prerequisite) Define "zero" Token:**
+    *   **[✓] Task:** Define "zero" as a Native Asset within the Wire system.
+    *   **[✓] Action:** Ensure `NativeAssetCreateCircuit` can be used (or is already used) to establish the "zero" token with its 1B initial supply. Determine how its Asset ID is represented.
+*   **[✓] Design & Implement Price Oracles (MPC Task Primarily, but affects Circuit):**
+    *   **Task:** Design the mechanism for MPCs ("Party") to fetch, agree upon, and attest to **both** `wBTC/USD` and `zero/USD` (or `zero/wBTC`) prices reliably.
+    *   **Action:** Specify the format for a *new* Price Attestation structure that includes *both* prices and potentially the price source/timestamp for each. This new attestation format will be input to the V2 stablecoin circuits.
+*   **[✓] Refactor `StablecoinMintCircuit` (`StablecoinMintV2Circuit`):**
+    *   **Task:** Modify the mint circuit to handle mixed collateral (70% wBTC, 30% "zero") and protocol fees.
+    *   **Action:**
+        *   Update **Inputs:** Accept *both* wBTC UTXOs and "zero" UTXOs, the new dual-price attestation, user signature.
+        *   Update **Logic:**
+            *   Verify ownership of *both* wBTC and "zero" input UTXOs.
+            *   Verify the dual-price attestation signature and recency.
+            *   Calculate the USD value of the proposed `zUSD` mint amount.
+            *   Calculate the required USD value of wBTC collateral (70% of `zUSD` value / 1.5 CR = ~46.67% of `zUSD` value).
+            *   Calculate the required USD value of "zero" collateral (30% of `zUSD` value / 1.5 CR = ~20% of `zUSD` value).
+            *   Convert required USD values to required wBTC and "zero" token amounts using the attested prices.
+            *   Calculate protocol fee (e.g., 0.1% of the `zUSD` value, taken proportionally from wBTC and "zero" collateral).
+            *   Verify user provided *at least* the required amounts of wBTC and "zero" (required + fee).
+            *   Consume input UTXOs (wBTC and "zero").
+            *   Create locked collateral UTXOs (or update MPC pool state) for *both* wBTC and "zero".
+            *   Create fee UTXOs (wBTC and "zero") sent to the protocol reservoir.
+            *   Create output `zUSD` UTXO for the user.
+            *   Create change UTXOs for *both* wBTC and "zero" if applicable.
+        *   Update **Outputs:** `zUSD` UTXO, change UTXOs (wBTC/"zero"), fee UTXOs (wBTC/"zero"), collateral locking state update.
+*   **[✓] Refactor `StablecoinRedeemCircuit` (`StablecoinRedeemV2Circuit`):**
+    *   **Task:** Modify the redeem circuit to return mixed collateral and handle protocol fees.
+    *   **Action:**
+        *   Update **Inputs:** Accept `zUSD` UTXO, dual-price attestation, potentially MPC "OK-to-Redeem" attestation (more complex now with mixed collateral), user signature.
+        *   Update **Logic:**
+            *   Verify ownership of input `zUSD` UTXO.
+            *   Verify attestation signatures and recency.
+            *   Calculate the total USD value being redeemed.
+            *   Calculate the target wBTC amount to return (70% of redeemed USD value / current wBTC/USD price).
+            *   Calculate the target "zero" amount to return (30% of redeemed USD value / current zero/USD price).
+            *   Calculate protocol fee (e.g., 0.1% of redeemed USD value, potentially paid in `zUSD` or deducted from returned collateral).
+            *   Verify sufficient *total collateral value* exists for this redemption (likely requires the MPC "OK-to-Redeem" check referencing the specific locked collateral for this mint).
+            *   Consume input `zUSD` UTXO.
+            *   Authorize release of corresponding wBTC and "zero" collateral.
+            *   Create output wBTC UTXO for the user (target wBTC amount - proportional fee, if applicable).
+            *   Create output "zero" UTXO for the user (target "zero" amount - proportional fee, if applicable).
+            *   (If fee paid in zUSD, ensure input zUSD covers redeemed amount + fee).
+        *   Update **Outputs:** wBTC UTXO, "zero" UTXO.
+*   **[✓] Implement Liquidation Mechanism (Major Task - May be Out of Scope):**
+    *   **Task:** Design and implement how undercollateralized positions (due to price drops, especially in "zero") are handled.
+    *   **Action:** Requires new circuits (`LiquidateCircuit`), interaction with MPCs to trigger liquidations based on price feeds, and potentially an auction mechanism. This is complex. *Confirm if this is in scope.*
+*   **[✓] Update Stablecoin Tests:**
+    *   **Task:** Write extensive tests for `StablecoinMintV2Circuit` and `StablecoinRedeemV2Circuit`.
+    *   **Action:** Test various collateral ratios, price scenarios (wBTC up, "zero" down, etc.), fee calculations, edge cases (zero amounts, dust amounts), and failure conditions (insufficient collateral, bad signatures, stale prices).
 
-**III. MPC System:**
+**III. ICO Mechanism:**
 
-*   **[✓] Secure Key Share Storage:**
-    *   **Task:** Review `src/mpc/secure_storage.rs`. Ensure key shares are encrypted at rest using strong, standard algorithms (e.g., AES-GCM) and proper key derivation (e.g., PBKDF2).
-    *   **Action:** Harden implementation if necessary. Document backup and recovery procedures clearly for operators.
-*   **[✓] Verify Ceremony Robustness:**
-    *   **Task:** Review DKG and signing ceremony logic in `src/mpc/ceremonies.rs`.
-    *   **Action:** Add checks for participant timeouts, invalid messages, and potential adversarial behavior. Implement recovery mechanisms for failed ceremonies.
-*   **[✓] Add MPC Audit Logging:**
-    *   **Task:** Implement comprehensive, secure logging for all critical MPC actions (ceremony participation, key generation, signing, attestation generation, withdrawals).
-    *   **Action:** Add logging points in `src/mpc/` modules. Ensure logs don't contain sensitive data.
-*   **[✓] Review Communication Security:**
-    *   **Task:** Verify the TLS implementation for node communication (`src/mpc/communication.rs`).
-    *   **Action:** Ensure certificate validation is strict. Implement replay protection (e.g., nonces, timestamps) and potentially rate limiting on the MPC API endpoints.
-*   **[✓] Harden Attestation/Withdrawal Logic:**
-    *   **Task:** Review MPC logic for LN bridge (`src/mpc/lightning.rs`), Stablecoin oracle/redemption (`src/mpc/stablecoin.rs`), and BTC bridging (`src/mpc/attestation.rs`, `src/mpc/burn.rs`).
-    *   **Action:** Ensure external data (LN payments, prices, BTC blocks) is validated. Implement robust nonce/ID checks for attestations to prevent replays. Verify signature generation logic. Add thorough error handling.
+*   **[✓] Design ICO Parameter Representation:**
+    *   **Task:** Define how ICO parameters are stored (e.g., dedicated "ICO Parameter UTXO", published off-chain and referenced by hash).
+    *   **Action:** Update core types if necessary.
+*   **[✓] Implement `ICOConfigCircuit` (Optional):**
+    *   **Task:** Create a circuit for creators to commit ICO parameters on-chain.
+    *   **Action:** Define inputs (params, signature) and outputs (parameter commitment/UTXO).
+*   **[✓] Implement `ICOContributeCircuit`:**
+    *   **Task:** Create the circuit for users to contribute payment assets.
+    *   **Action:** Define inputs (payment UTXO, ICO identifier/params, amount, signature), logic (verify payment, create locked escrow UTXO), and outputs (escrow UTXO, change UTXO).
+*   **[✓] Define `ICOSettlementAttestation` Format (MPC Task):**
+    *   **Task:** Specify the data structure MPCs will sign to attest to ICO success/failure.
+    *   **Action:** Define fields (ICO ID, outcome, total raised, timestamp, signature).
+*   **[✓] Implement `ICOSuccessSettleCircuit`:**
+    *   **Task:** Create the circuit to distribute tokens and funds upon successful ICO completion.
+    *   **Action:** Define inputs (attestation, *many* escrow UTXOs, creator token UTXO, signature). Implement logic for attestation verification, consuming inputs, pro-rata calculation, fee calculation (1%), creating *many* output UTXOs (native tokens to contributors, funds to creator, fees to reservoir). **Address scalability concerns regarding the number of inputs/outputs.**
+*   **[✓] Implement `ICOFailureRefundCircuit`:**
+    *   **Task:** Create the circuit for users to claim refunds upon failed ICO.
+    *   **Action:** Define inputs (attestation, user's escrow UTXO, signature). Implement logic for attestation verification, consuming escrow UTXO, creating refund UTXO.
+*   **[✓] Add ICO Tests:**
+    *   **Task:** Test all new ICO circuits.
+    *   **Action:** Test contribution, successful settlement (distribution, fees), failed settlement (refunds), edge cases (min/max raise, deadline).
 
-**IV. Testing & Verification:**
+**IV. Airdrop Mechanism:**
 
-*   **[✓] Enhance Circuit Test Coverage:**
-    *   **Task:** Write specific tests for edge cases (zero amounts, max values, empty inputs/outputs) in all circuits.
-    *   **Action:** Expand test files in `tests/` (e.g., `transfer_circuit_tests.rs`, etc.) and `tests/audit/edge_cases.rs`.
-*   **[✓] Add Negative Tests:**
-    *   **Task:** Create tests that *expect* proof generation or verification to fail due to violated constraints (e.g., invalid signature, insufficient funds, conservation violation).
-    *   **Action:** Add tests asserting specific `WireError` types are returned.
-*   **[✓] Verify Fuzz Test Coverage:**
-    *   **Task:** Review fuzz tests (`tests/audit/fuzz.rs`, `enhanced_fuzz.rs`) and ensure they cover critical components and potential attack vectors identified in security reviews.
-    *   **Action:** Expand fuzz targets if necessary.
-*   **[✓] Update Audit Test Vectors:**
-    *   **Task:** Ensure `generate_audit_test_vectors.rs` produces deterministic vectors covering all major valid and invalid scenarios based on the final circuit implementations.
-    *   **Action:** Update generation logic and `docs/audit_test_vectors.md`.
+*   **[✓] Implement `AirdropLockCircuit` (Optional):**
+    *   **Task:** Create a circuit for creators to lock the total airdrop supply and commit to the Merkle root.
+    *   **Action:** Define inputs (creator token UTXO, Merkle root, signature), logic (consume input, create locked escrow UTXO with Merkle root metadata), outputs (escrow UTXO).
+*   **[✓] Implement `AirdropClaimCircuit`:**
+    *   **Task:** Create the circuit for users to claim their airdropped tokens.
+    *   **Action:** Define inputs (Merkle proof components: siblings, index/path), user-specific data (amount, salt), signature/fee payment. Define public inputs (Merkle Root, Claim Nullifier). Implement logic for leaf hash reconstruction, Merkle proof verification, signature/fee check, creating output native token UTXO, registering claim nullifier.
+*   **[✓] Define Airdrop Nullifier Scheme:**
+    *   **Task:** Design how to prevent double-claims per user per airdrop.
+    *   **Action:** Define nullifier input (e.g., hash(airdrop_id || user_address)).
+*   **[✓] Add Airdrop Tests:**
+    *   **Task:** Test the `AirdropClaimCircuit`.
+    *   **Action:** Test valid claims, invalid claims (bad proof, wrong amount), double-claim attempts.
 
-**V. Code Quality & Robustness:**
+**V. WASM Bindings & CLI Updates:**
 
-*   **[✓] Eliminate Panics:**
-    *   **Task:** Search the codebase for `.unwrap()` and `.expect()` calls.
-    *   **Action:** Replace panics with proper error handling using the `WireResult` and error types defined in `src/errors.rs`.
-*   **[✓] Review Error Handling & Sanitization:**
-    *   **Task:** Ensure errors are propagated correctly and that `sanitize_error_message` effectively prevents leaking sensitive internal state.
-    *   **Action:** Audit error paths and external-facing error messages.
-*   **[✓] Improve Input Validation:**
-    *   **Task:** Review validation logic in `src/cli/validation.rs` and `src/wasm/validation.rs`.
-    *   **Action:** Ensure all user inputs (CLI args, WASM params, API inputs) are strictly validated. Add missing checks, tighten existing ones (e.g., length limits, format checks).
-*   **[✓] Code Cleanup:**
-    *   **Task:** Remove dead code, add clarifying comments, ensure consistent formatting (`cargo fmt`), and address clippy warnings (`cargo clippy`).
-    *   **Action:** Run linters, formatters, and manually review code for clarity and maintainability.
-*   **[✓] Update Dependencies:**
-    *   **Task:** Check for updates to dependencies, especially cryptographic libraries (Plonky2, ed25519-dalek) and apply security patches.
-    *   **Action:** Run `cargo update`, test thoroughly after updates.
+*   **[✓] Expose New Circuits via WASM:**
+    *   **Task:** Add `#[wasm_bindgen]` wrappers for all new circuits (`Stablecoin V2`, `ICO`, `Airdrop`).
+    *   **Action:** Create functions like `generate_ico_contribute_proof`, `verify_airdrop_claim_proof`, etc., ensuring data types are compatible between Rust and JS.
+*   **[✓] Update CLI:**
+    *   **Task:** Add new subcommands to the `wire` CLI tool for interacting with the new features.
+    *   **Action:** Add commands like `wire amm configure-fees`, `wire stablecoin mint-v2`, `wire ico contribute`, `wire airdrop claim`, etc. Update argument parsing and command execution logic.
 
-**VI. Documentation:**
+**VI. General Tasks:**
 
-*   **[✓] Document AMM State Management:**
-    *   **Task:** Update relevant documentation (`docs/`) to explain the `PoolStateUTXO` mechanism and the challenges/solutions for user interaction (e.g., needing off-chain indexers).
-*   **[✓] Document Collateral Locking:**
-    *   **Task:** Clearly document the chosen mechanism for locking stablecoin collateral in `docs/` and ensure it aligns with the circuit implementation.
-*   **[✓] Final Documentation Review:**
-    *   **Task:** Ensure all guides (`USER_GUIDE.md`, `installation_guide.md`, etc.) and technical docs (`mpc_*.md`, `api_reference.md`) are accurate and reflect the final implementation.
+*   **[✓] Update Core Types:** Define new structs/targets if needed (e.g., `ZeroTokenUTXO`, `ICOParameterUTXO`, `EscrowUTXO`, `AirdropLeafData`).
+*   **[✓] Update Error Handling:** Add new error variants to `WireError` and sub-enums as needed.
+*   **[✓] Update Documentation:** Document all new circuits, fee mechanisms, stablecoin V2 design, ICO flow, and airdrop process. Update user guides and API references.
+*   **[✓] Refactor/Optimize:** Review existing code for potential refactoring opportunities arising from the new features. Optimize new circuits for constraint count.
 
----
-
-Completing these internal tasks will significantly strengthen the codebase and streamline the external audit process. Prioritize tasks related to circuit constraints and MPC security.
+This list is extensive, particularly the Stablecoin V2 and ICO features, which require significant design and implementation effort, including coordination with the teams building the off-chain components (Party/Minter, Explorer).
