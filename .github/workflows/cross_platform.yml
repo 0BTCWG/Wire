@@ -310,8 +310,8 @@ jobs:
         if [ -d "artifacts/wasm-package" ] && [ -f "artifacts/wasm-package/package.json" ]; then
           cd artifacts/wasm-package
           
-          # Check if NPM_TOKEN secret is available
-          if [ -n "$NODE_AUTH_TOKEN" ]; then
+          # Check if NPM_TOKEN environment variable is available
+          if [ -n "${{ secrets.NPM_TOKEN }}" ]; then
             npm publish --access public
             echo "Published to NPM"
           else

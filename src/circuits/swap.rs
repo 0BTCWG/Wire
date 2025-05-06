@@ -386,14 +386,17 @@ impl SwapCircuit {
         builder.connect(output_utxo.amount_target, output_amount);
 
         // Set the output UTXO's owner to the user's public key hash
-        let user_pk_hash = hash_n(builder, &[self.user_pk.point.x, self.user_pk.point.y], HASH_SIZE);
-        for i in 0..HASH_SIZE {
-            builder.connect(output_utxo.owner_pubkey_hash_target[i], user_pk_hash[i]);
+        let user_pk_hash = hash_n(builder, &[self.user_pk.point.x, self.user_pk.point.y]);
+        let user_pk_hash_vec = vec![user_pk_hash];
+        for i in 0..HASH_SIZE.min(user_pk_hash_vec.len()) {
+            builder.connect(output_utxo.owner_pubkey_hash_target[i], user_pk_hash_vec[i]);
         }
 
         // Create a random salt for the output UTXO
         let output_salt = builder.add_virtual_target();
-        builder.connect(output_utxo.salt_target, output_salt);
+        if !output_utxo.salt_target.is_empty() {
+            builder.connect(output_utxo.salt_target[0], output_salt);
+        }
 
         // Create the protocol fee UTXO if the protocol fee is greater than zero
         let protocol_fee_utxo = UTXOTarget::add_virtual(builder, HASH_SIZE);
@@ -419,7 +422,9 @@ impl SwapCircuit {
         
         // Create a random salt for the protocol fee UTXO
         let protocol_fee_salt = builder.add_virtual_target();
-        builder.connect(protocol_fee_utxo.salt_target, protocol_fee_salt);
+        if !protocol_fee_utxo.salt_target.is_empty() {
+            builder.connect(protocol_fee_utxo.salt_target[0], protocol_fee_salt);
+        }
 
         Ok((output_amount, output_utxo, protocol_fee_utxo, new_pool_state))
     }
