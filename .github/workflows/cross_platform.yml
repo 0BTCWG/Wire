@@ -83,25 +83,33 @@ jobs:
         
         # First try with no default features
         echo "Attempting build with no default features..."
-        cargo build --release --verbose --no-default-features || echo "Build with no default features failed"
+        cargo build --release --verbose --no-default-features
+        
+        # Store the exit code in a platform-independent way
+        BUILD_FAILED=$?
         
         # If that fails, try with specific features disabled
-        if [ $? -ne 0 ]; then
+        if [ $BUILD_FAILED -ne 0 ]; then
           echo "Trying build with specific features disabled..."
           # Disable features that might be causing issues
           cargo build --release --verbose --no-default-features --features="plonky2,serde" || echo "Build with limited features failed"
         fi
+      shell: bash
 
     - name: Run tests
       run: |
         echo "Running minimal tests..."
-        cargo test --lib --release --verbose --no-default-features --no-run || echo "Test compilation failed, but continuing"
+        cargo test --lib --release --verbose --no-default-features --no-run
+        
+        # Store the exit code in a platform-independent way
+        TEST_COMPILE_FAILED=$?
         
         # Only run tests if compilation succeeded
-        if [ $? -eq 0 ]; then
+        if [ $TEST_COMPILE_FAILED -eq 0 ]; then
           echo "Running actual tests..."
           cargo test --lib --release --verbose --no-default-features || echo "Some tests failed, but continuing"
         fi
+      shell: bash
 
     - name: Upload artifacts
       uses: actions/upload-artifact@v4
@@ -149,6 +157,7 @@ jobs:
           # Try with explicit wasm feature
           echo "Attempting WASM build with minimal features..."
           wasm-pack build --target web --no-default-features --features="wasm" || echo "WASM build with minimal features failed"
+        shell: bash
       
       - name: Build WASM package with fallbacks
         run: |
@@ -167,6 +176,7 @@ jobs:
             echo "Second attempt failed, trying with all features..."
             wasm-pack build --target web || echo "All WASM build attempts failed"
           fi
+        shell: bash
       
       - name: Prepare package.json for npm
         run: |
@@ -211,6 +221,7 @@ jobs:
           else
             echo "pkg/package.json not found, skipping npm preparation"
           fi
+        shell: bash
       
       - name: Upload WASM artifacts
         uses: actions/upload-artifact@v4
@@ -273,6 +284,7 @@ jobs:
         else
           echo "WASM package directory artifacts/wasm-package not found!"
         fi
+      shell: bash
     
     - name: Create GitHub Release
       uses: softprops/action-gh-release@v1
@@ -313,6 +325,7 @@ jobs:
       env:
         NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
       continue-on-error: true
+      shell: bash
     
     - name: Setup Node.js for GitHub Packages
       uses: actions/setup-node@v4
@@ -325,7 +338,7 @@ jobs:
       run: |
         if [ -d "artifacts/wasm-package" ] && [ -f "artifacts/wasm-package/package.json" ]; then
           cd artifacts/wasm-package
-          // Update package name for GitHub Packages
+          # Update package name for GitHub Packages
           node -e "
             const fs = require('fs');
             const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -339,3 +352,4 @@ jobs:
         fi
       env:
         NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      shell: bash
