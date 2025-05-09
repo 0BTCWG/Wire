@@ -3,10 +3,11 @@
 
 use plonky2::field::goldilocks_field::GoldilocksField;
 use plonky2::field::types::Field;
-use plonky2::iop::witness::PartialWitness;
+use plonky2::iop::witness::{PartialWitness, WitnessWrite};
 use plonky2::plonk::circuit_builder::CircuitBuilder;
 use plonky2::plonk::circuit_data::CircuitConfig;
-use plonky2::plonk::config::PoseidonGoldilocksConfig;
+use plonky2::plonk::config::{GenericConfig, PoseidonGoldilocksConfig};
+use plonky2::hash::poseidon::PoseidonHash;
 use std::time::Instant;
 
 type F = GoldilocksField;
@@ -53,8 +54,8 @@ fn benchmark_simple_circuit() {
 
     // Create a witness
     let mut pw = PartialWitness::new();
-    pw.set_target(x, F::from_canonical_u64(2));
-    pw.set_target(y, F::from_canonical_u64(3));
+    pw.set_target(x, F::from_canonical_u64(2)).unwrap();
+    pw.set_target(y, F::from_canonical_u64(3)).unwrap();
 
     // Generate a proof
     let start = Instant::now();
@@ -89,9 +90,12 @@ fn benchmark_hash_operations() {
     let start = Instant::now();
     let mut builder = CircuitBuilder::<F, D>::new(CircuitConfig::standard_recursion_config());
 
-    // Create hash operations
+    // Hash a single value
     let input = builder.add_virtual_target();
-    let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonGoldilocksConfig>(&[input]);
+
+    // Hash using PoseidonHash instead of PoseidonGoldilocksConfig
+    let hash_result = builder.hash_n_to_hash_no_pad::<PoseidonHash>(vec![input]);
+
     builder.register_public_input(hash_result.elements[0]);
 
     let circuit_creation_time = start.elapsed();
@@ -109,7 +113,7 @@ fn benchmark_hash_operations() {
 
     // Create a witness
     let mut pw = PartialWitness::new();
-    pw.set_target(input, F::from_canonical_u64(42));
+    pw.set_target(input, F::from_canonical_u64(42)).unwrap();
 
     // Generate a proof
     let start = Instant::now();

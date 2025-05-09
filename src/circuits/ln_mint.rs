@@ -215,18 +215,18 @@ impl LNMintCircuit {
             .collect::<Vec<_>>();
         for i in 0..HASH_SIZE {
             if i < payment_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     payment_hash_target[i],
                     GoldilocksField::from_canonical_u64(payment_hash[i] as u64),
                 );
             } else {
-                pw.set_target(payment_hash_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(payment_hash_target[i], GoldilocksField::ZERO);
             }
         }
 
         // Set amount
         let amount_target = builder.add_virtual_target();
-        pw.set_target(amount_target, GoldilocksField::from_canonical_u64(amount));
+        let _ = pw.set_target(amount_target, GoldilocksField::from_canonical_u64(amount));
 
         // Set recipient public key hash
         let recipient_pk_hash_target = (0..HASH_SIZE)
@@ -234,58 +234,58 @@ impl LNMintCircuit {
             .collect::<Vec<_>>();
         for i in 0..HASH_SIZE {
             if i < recipient_pk_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     recipient_pk_hash_target[i],
                     GoldilocksField::from_canonical_u64(recipient_pk_hash[i] as u64),
                 );
             } else {
-                pw.set_target(recipient_pk_hash_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(recipient_pk_hash_target[i], GoldilocksField::ZERO);
             }
         }
 
         // Set timestamp
         let timestamp_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             timestamp_target,
             GoldilocksField::from_canonical_u64(timestamp),
         );
 
         // Set current timestamp
         let current_timestamp_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             current_timestamp_target,
             GoldilocksField::from_canonical_u64(current_timestamp),
         );
 
         // Set time window
         let time_window_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             time_window_target,
             GoldilocksField::from_canonical_u64(time_window),
         );
 
         // Set MPC public key
         let mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             mpc_pk.point.x,
             GoldilocksField::from_canonical_u64(mpc_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             mpc_pk.point.y,
             GoldilocksField::from_canonical_u64(mpc_pk_y),
         );
 
         // Set MPC signature
         let signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             signature.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             signature.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );

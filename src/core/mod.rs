@@ -3,7 +3,7 @@
 pub mod collateral_utxo;
 mod constants;
 pub mod proof;
-mod types;
+pub mod types;
 pub mod virtual_cpmm;
 
 pub use collateral_utxo::*;

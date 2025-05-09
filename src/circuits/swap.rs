@@ -85,7 +85,7 @@ impl SwapCircuit {
         );
 
         // Compute the nullifier for the input UTXO
-        let nullifier_utxo = NullifierUTXOTarget {
+        let _nullifier = NullifierUTXOTarget {
             owner_pubkey_hash_target: self.input_utxo.owner_pubkey_hash_target.clone(),
             asset_id_target: self.input_utxo.asset_id_target.clone(),
             amount_target: vec![self.input_utxo.amount_target],
@@ -94,9 +94,9 @@ impl SwapCircuit {
 
         // Calculate the nullifier using circuit-specific domain separation
         // This ensures nullifiers from SwapCircuit cannot collide with nullifiers from other circuits
-        let nullifier = crate::utils::nullifier::calculate_and_register_circuit_nullifier(
+        let _nullifier = crate::utils::nullifier::calculate_and_register_circuit_nullifier(
             builder,
-            &nullifier_utxo,
+            &_nullifier,
             SWAP,
         );
 
@@ -220,10 +220,10 @@ impl SwapCircuit {
         };
         
         // Calculate the LP fee (total fee - protocol fee)
-        let lp_fee_amount = builder.sub(total_fee_amount, protocol_fee_amount);
+        let _lp_fee_amount = builder.sub(total_fee_amount, protocol_fee_amount);
 
         // Calculate the new input reserve
-        let new_input_reserve = builder.add(input_reserve, self.input_utxo.amount_target);
+        let _new_input_reserve = builder.add(input_reserve, self.input_utxo.amount_target);
 
         // Calculate the new output reserve using the constant product formula with fees
         // k = input_reserve * output_reserve
@@ -834,10 +834,10 @@ mod tests {
         let input_amount = builder.constant(GoldilocksField::from_canonical_u64(1000000)); // 1M
         builder.connect(input_utxo.amount_target, input_amount);
 
-        let token_a_id = (0..HASH_SIZE)
+        let token_a_id: Vec<Target> = (0..HASH_SIZE)
             .map(|_| builder.add_virtual_target())
             .collect();
-        let token_b_id = (0..HASH_SIZE)
+        let token_b_id: Vec<Target> = (0..HASH_SIZE)
             .map(|_| builder.add_virtual_target())
             .collect();
 
@@ -984,10 +984,8 @@ mod tests {
         // Create an input UTXO with 100,000 of token A
         let input_amount = 100_000;
         let input_utxo = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
-        builder.connect(
-            input_utxo.amount_target,
-            builder.constant(GoldilocksField::from_canonical_u64(input_amount)),
-        );
+        let input_amount_target = builder.constant(GoldilocksField::from_canonical_u64(input_amount));
+        builder.connect(input_utxo.amount_target, input_amount_target);
 
         // Set the input UTXO's asset ID to token A
         for i in 0..HASH_SIZE {
@@ -1049,21 +1047,24 @@ mod tests {
         let expected_lp_fee_amount = expected_total_fee_amount - expected_protocol_fee_amount;
 
         // Verify the output amount
-        let output_amount_value = builder.get_target_as_source(output_amount);
-        assert_eq!(output_amount_value.to_canonical_u64(), expected_output_amount);
+        // Note: We can't directly get the value from a target in the test
+        // Instead, we'll connect it to a constant with the expected value
+        let expected_output = builder.constant(GoldilocksField::from_canonical_u64(expected_output_amount));
+        builder.connect(output_amount, expected_output);
 
         // Verify the protocol fee amount
-        let protocol_fee_amount_value = builder.get_target_as_source(protocol_fee_utxo.amount_target);
-        assert_eq!(protocol_fee_amount_value.to_canonical_u64(), expected_protocol_fee_amount);
+        // Use connect to verify the value
+        let expected_protocol_fee = builder.constant(GoldilocksField::from_canonical_u64(expected_protocol_fee_amount));
+        builder.connect(protocol_fee_utxo.amount_target, expected_protocol_fee);
 
         // Verify the new pool state
         // New token A reserve = token_a_reserve + input_amount = 1,000,000 + 100,000 = 1,100,000
-        let new_token_a_reserve_value = builder.get_target_as_source(new_pool_state.token_a_reserve);
-        assert_eq!(new_token_a_reserve_value.to_canonical_u64(), 1_000_000 + input_amount);
+        let expected_token_a_reserve = builder.constant(GoldilocksField::from_canonical_u64(1_000_000 + input_amount));
+        builder.connect(new_pool_state.token_a_reserve, expected_token_a_reserve);
 
         // New token B reserve = token_b_reserve - output_amount = 2,000,000 - expected_output_amount
-        let new_token_b_reserve_value = builder.get_target_as_source(new_pool_state.token_b_reserve);
-        assert_eq!(new_token_b_reserve_value.to_canonical_u64(), 2_000_000 - expected_output_amount);
+        let expected_token_b_reserve = builder.constant(GoldilocksField::from_canonical_u64(2_000_000 - expected_output_amount));
+        builder.connect(new_pool_state.token_b_reserve, expected_token_b_reserve);
 
         // Verify the constant product formula with fees
         // (token_a_reserve + input_amount_with_fee) * new_output_reserve ≈ token_a_reserve * token_b_reserve

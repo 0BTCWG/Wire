@@ -1,5 +1,5 @@
 // Input validation for the 0BTC Wire CLI
-use crate::errors::{ValidationError as WireValidationError, WireError};
+use wire_lib::errors::{ValidationError as WireValidationError, WireError};
 use log::warn;
 use serde_json::Value;
 use std::fs;
@@ -85,7 +85,7 @@ impl From<ValidationError> for WireError {
                 WireError::ValidationError(WireValidationError::InvalidFormat(msg))
             }
             ValidationError::FileSystem(msg) => {
-                WireError::IOError(crate::errors::IOError::FileSystem(msg))
+                WireError::IOError(wire_lib::errors::IOError::FileSystem(msg))
             }
             ValidationError::FileTooLarge(msg) => {
                 WireError::ValidationError(WireValidationError::InvalidLength(msg))

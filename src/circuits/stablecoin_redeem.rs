@@ -609,16 +609,16 @@ impl StablecoinRedeemCircuit {
         // Set up input UTXO with zUSD
         for i in 0..HASH_SIZE {
             if i < input_utxo_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(input_utxo.asset_id_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(input_utxo.asset_id_target[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo.amount_target[0],
             GoldilocksField::from_canonical_u64(input_utxo_amount),
         );
@@ -626,12 +626,12 @@ impl StablecoinRedeemCircuit {
         // Set up owner pubkey hash
         for i in 0..HASH_SIZE {
             if i < input_utxo_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_owner[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
@@ -644,19 +644,19 @@ impl StablecoinRedeemCircuit {
         // Set up collateral UTXO
         for i in 0..HASH_SIZE {
             if i < collateral_utxo_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     collateral_utxo.utxo.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(collateral_utxo_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     collateral_utxo.utxo.asset_id_target[i],
                     GoldilocksField::ZERO,
                 );
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             collateral_utxo.utxo.amount_target,
             GoldilocksField::from_canonical_u64(collateral_utxo_amount),
         );
@@ -664,12 +664,12 @@ impl StablecoinRedeemCircuit {
         // Set up owner pubkey hash for collateral UTXO
         for i in 0..HASH_SIZE {
             if i < collateral_utxo_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     collateral_utxo.utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(collateral_utxo_owner[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     collateral_utxo.utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
@@ -684,25 +684,25 @@ impl StablecoinRedeemCircuit {
         };
 
         // Set price attestation values
-        pw.set_target(
+        let _ = pw.set_target(
             price_attestation.timestamp,
             GoldilocksField::from_canonical_u64(price_timestamp),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             price_attestation.btc_usd_price,
             GoldilocksField::from_canonical_u64(btc_usd_price),
         );
 
         // Set price signature values
-        pw.set_target(
+        let _ = pw.set_target(
             price_attestation.signature.r_point.x,
             GoldilocksField::from_canonical_u64(price_signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             price_attestation.signature.r_point.y,
             GoldilocksField::from_canonical_u64(price_signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             price_attestation.signature.s_scalar,
             GoldilocksField::from_canonical_u64(price_signature_s),
         );
@@ -718,11 +718,11 @@ impl StablecoinRedeemCircuit {
         };
 
         // Set up redeem attestation values
-        pw.set_target(
+        let _ = pw.set_target(
             redeem_attestation.zusd_amount,
             GoldilocksField::from_canonical_u64(zusd_amount),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             redeem_attestation.timestamp,
             GoldilocksField::from_canonical_u64(redeem_timestamp),
         );
@@ -730,43 +730,43 @@ impl StablecoinRedeemCircuit {
         // Set user public key hash in redeem attestation
         for i in 0..HASH_SIZE {
             if i < input_utxo_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     redeem_attestation.user_pkh[i],
                     GoldilocksField::from_canonical_u64(input_utxo_owner[i] as u64),
                 );
             } else {
-                pw.set_target(redeem_attestation.user_pkh[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(redeem_attestation.user_pkh[i], GoldilocksField::ZERO);
             }
         }
 
         // Set redeem signature values
-        pw.set_target(
+        let _ = pw.set_target(
             redeem_attestation.signature.r_point.x,
             GoldilocksField::from_canonical_u64(redeem_signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             redeem_attestation.signature.r_point.y,
             GoldilocksField::from_canonical_u64(redeem_signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             redeem_attestation.signature.s_scalar,
             GoldilocksField::from_canonical_u64(redeem_signature_s),
         );
 
         // Set MPC public key
         let mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             mpc_pk.point.x,
             GoldilocksField::from_canonical_u64(mpc_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             mpc_pk.point.y,
             GoldilocksField::from_canonical_u64(mpc_pk_y),
         );
 
         // Set current timestamp (use current Unix timestamp)
         let current_timestamp = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             current_timestamp,
             GoldilocksField::from_canonical_u64(
                 std::time::SystemTime::now()
@@ -778,29 +778,29 @@ impl StablecoinRedeemCircuit {
 
         // Set time window (5 minutes)
         let time_window = builder.add_virtual_target();
-        pw.set_target(time_window, GoldilocksField::from_canonical_u64(300));
+        let _ = pw.set_target(time_window, GoldilocksField::from_canonical_u64(300));
 
         // Set user signature and public key
         let user_signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.x,
             GoldilocksField::from_canonical_u64(user_signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.y,
             GoldilocksField::from_canonical_u64(user_signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.s_scalar,
             GoldilocksField::from_canonical_u64(user_signature_s),
         );
 
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.x,
             GoldilocksField::from_canonical_u64(user_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.y,
             GoldilocksField::from_canonical_u64(user_pk_y),
         );

@@ -34,3 +34,16 @@ pub struct MemoryEstimate {
     pub witness_bytes: usize,
     pub proof_bytes: usize,
 }
+
+use std::fs::File;
+use std::io::BufReader;
+use std::path::Path;
+use serde::de::DeserializeOwned;
+use crate::errors::{WireError, WireResult, IOError};
+
+/// Load a JSON file and deserialize it into the specified type
+pub fn load_json_file<T: DeserializeOwned, P: AsRef<Path>>(path: P) -> WireResult<T> {
+    let file = File::open(path).map_err(|e| WireError::IOError(IOError::FileSystem(e.to_string())))?;
+    let reader = BufReader::new(file);
+    serde_json::from_reader(reader).map_err(|e| WireError::IOError(IOError::DeserializationError(e.to_string())))
+}

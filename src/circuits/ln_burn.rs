@@ -223,16 +223,16 @@ impl LNBurnCircuit {
         // Set up input UTXO with zLN
         for i in 0..HASH_SIZE {
             if i < input_utxo_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(input_utxo.asset_id_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(input_utxo.asset_id_target[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo.amount_target[0],
             GoldilocksField::from_canonical_u64(input_utxo_amount),
         );
@@ -240,12 +240,12 @@ impl LNBurnCircuit {
         // Set up owner pubkey hash
         for i in 0..HASH_SIZE {
             if i < input_utxo_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_owner[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
@@ -258,12 +258,12 @@ impl LNBurnCircuit {
             .collect::<Vec<_>>();
         for i in 0..HASH_SIZE {
             if i < payment_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     payment_hash_target[i],
                     GoldilocksField::from_canonical_u64(payment_hash[i] as u64),
                 );
             } else {
-                pw.set_target(payment_hash_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(payment_hash_target[i], GoldilocksField::ZERO);
             }
         }
 
@@ -273,22 +273,22 @@ impl LNBurnCircuit {
             .collect::<Vec<_>>();
         for i in 0..HASH_SIZE {
             if i < payment_preimage.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     _payment_preimage_target[i],
                     GoldilocksField::from_canonical_u64(payment_preimage[i] as u64),
                 );
             } else {
-                pw.set_target(_payment_preimage_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(_payment_preimage_target[i], GoldilocksField::ZERO);
             }
         }
 
         // Set amount
         let amount_target = builder.add_virtual_target();
-        pw.set_target(amount_target, GoldilocksField::from_canonical_u64(amount));
+        let _ = pw.set_target(amount_target, GoldilocksField::from_canonical_u64(amount));
 
         // Set fee
         let _fee_target = builder.add_virtual_target();
-        pw.set_target(_fee_target, GoldilocksField::from_canonical_u64(fee));
+        let _ = pw.set_target(_fee_target, GoldilocksField::from_canonical_u64(fee));
 
         // Set recipient public key hash
         let _recipient_pk_hash: Vec<Target> = (0..HASH_SIZE)
@@ -296,47 +296,47 @@ impl LNBurnCircuit {
             .collect();
         for i in 0..HASH_SIZE {
             if i < recipient_pk_hash.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     _recipient_pk_hash[i],
                     GoldilocksField::from_canonical_u64(recipient_pk_hash[i] as u64),
                 );
             } else {
-                pw.set_target(_recipient_pk_hash[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(_recipient_pk_hash[i], GoldilocksField::ZERO);
             }
         }
 
         // Set MPC public key
         let _mpc_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             _mpc_pk.point.x,
             GoldilocksField::from_canonical_u64(mpc_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             _mpc_pk.point.y,
             GoldilocksField::from_canonical_u64(mpc_pk_y),
         );
 
         // Set user signature and public key
         let user_signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.x,
             GoldilocksField::from_canonical_u64(user_signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.y,
             GoldilocksField::from_canonical_u64(user_signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.s_scalar,
             GoldilocksField::from_canonical_u64(user_signature_s),
         );
 
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.x,
             GoldilocksField::from_canonical_u64(user_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.y,
             GoldilocksField::from_canonical_u64(user_pk_y),
         );

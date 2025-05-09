@@ -346,55 +346,24 @@ jobs:
         prerelease: false
         generate_release_notes: true
     
-    - name: Setup Node.js for NPM
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        registry-url: 'https://registry.npmjs.org'
-        scope: '@0btc'
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-
-    - name: Publish to NPM
-      run: |
-        if [ -d "artifacts/wasm-package" ] && [ -f "artifacts/wasm-package/package.json" ]; then
-          cd artifacts/wasm-package
-          npm publish --access public
-          echo "Published to NPM"
-        else
-          echo "WASM package not found or package.json missing, skipping NPM publish"
-        fi
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-      continue-on-error: true
+    - name: Publish to npmjs.com
+      if: startsWith(github.ref, 'refs/tags/') && github.repository == '0BTC/Wire'
       shell: bash
-    
-    - name: Setup Node.js for GitHub Packages
-      uses: actions/setup-node@v4
-      with:
-        node-version: '18'
-        registry-url: 'https://npm.pkg.github.com'
-        scope: '@0btc'
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
+      run: |
+        cd artifacts/wasm-package
+        echo "//registry.npmjs.org/:_authToken=${GITHUB_TOKEN}" > .npmrc
+        npm publish --access public
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true
 
     - name: Publish to GitHub Packages
-      run: |
-        if [ -d "artifacts/wasm-package" ] && [ -f "artifacts/wasm-package/package.json" ]; then
-          cd artifacts/wasm-package
-          # Update package name for GitHub Packages
-          node -e "
-            const fs = require('fs');
-            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
-            pkg.name = '@0btc/wire-lib';
-            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
-          "
-          npm publish
-          echo "Published to GitHub Packages"
-        else
-          echo "WASM package not found or package.json missing, skipping GitHub Packages publish"
-        fi
-      env:
-        NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/')
-      continue-on-error: true
+      if: startsWith(github.ref, 'refs/tags/') && github.repository == '0BTC/Wire'
       shell: bash
+      run: |
+        cd artifacts/wasm-package
+        echo "//npm.pkg.github.com/:_authToken=${GITHUB_TOKEN}" > .npmrc
+        npm publish --registry=https://npm.pkg.github.com/
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      continue-on-error: true

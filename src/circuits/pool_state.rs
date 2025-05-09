@@ -9,20 +9,20 @@ use crate::core::HASH_SIZE;
 /// Represents a liquidity pool state
 #[derive(Clone)]
 pub struct PoolStateTarget {
-    /// The pool ID (hash of tokenA_asset_id and tokenB_asset_id)
+    /// The pool ID (hash of token_a_asset_id and token_b_asset_id)
     pub pool_id: Vec<Target>,
 
     /// The asset ID of token A
-    pub tokenA_asset_id: Vec<Target>,
+    pub token_a_asset_id: Vec<Target>,
 
     /// The asset ID of token B
-    pub tokenB_asset_id: Vec<Target>,
+    pub token_b_asset_id: Vec<Target>,
 
     /// The reserve of token A
-    pub reserveA: Target,
+    pub reserve_a: Target,
 
     /// The reserve of token B
-    pub reserveB: Target,
+    pub reserve_b: Target,
 
     /// The total supply of LP tokens
     pub total_lp_shares: Target,
@@ -59,14 +59,14 @@ impl PoolStateTarget {
             pool_id: (0..HASH_SIZE)
                 .map(|_| builder.add_virtual_target())
                 .collect(),
-            tokenA_asset_id: (0..HASH_SIZE)
+            token_a_asset_id: (0..HASH_SIZE)
                 .map(|_| builder.add_virtual_target())
                 .collect(),
-            tokenB_asset_id: (0..HASH_SIZE)
+            token_b_asset_id: (0..HASH_SIZE)
                 .map(|_| builder.add_virtual_target())
                 .collect(),
-            reserveA: builder.add_virtual_target(),
-            reserveB: builder.add_virtual_target(),
+            reserve_a: builder.add_virtual_target(),
+            reserve_b: builder.add_virtual_target(),
             total_lp_shares: builder.add_virtual_target(),
             has_transitioned: builder.add_virtual_target(),
             current_supply: builder.add_virtual_target(),
@@ -82,10 +82,10 @@ impl PoolStateTarget {
         // Concatenate all fields
         let mut inputs = Vec::new();
         inputs.extend_from_slice(&self.pool_id);
-        inputs.extend_from_slice(&self.tokenA_asset_id);
-        inputs.extend_from_slice(&self.tokenB_asset_id);
-        inputs.push(self.reserveA);
-        inputs.push(self.reserveB);
+        inputs.extend_from_slice(&self.token_a_asset_id);
+        inputs.extend_from_slice(&self.token_b_asset_id);
+        inputs.push(self.reserve_a);
+        inputs.push(self.reserve_b);
         inputs.push(self.total_lp_shares);
         inputs.push(self.has_transitioned);
         inputs.push(self.current_supply);

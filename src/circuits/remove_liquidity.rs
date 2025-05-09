@@ -118,9 +118,9 @@ impl RemoveLiquidityCircuit {
         .expect("Failed to calculate lp_ratio");
 
         // Calculate the token amounts to return
-        let amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA)
+        let amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserve_a)
             .expect("Failed to calculate amount_a");
-        let amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB)
+        let amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserve_b)
             .expect("Failed to calculate amount_b");
 
         // Ensure the output amounts are at least the minimum requested
@@ -139,29 +139,29 @@ impl RemoveLiquidityCircuit {
                 self.current_pool_state.pool_id[i],
             );
             builder.connect(
-                new_pool_state.tokenA_asset_id[i],
-                self.current_pool_state.tokenA_asset_id[i],
+                new_pool_state.token_a_asset_id[i],
+                self.current_pool_state.token_a_asset_id[i],
             );
             builder.connect(
-                new_pool_state.tokenB_asset_id[i],
-                self.current_pool_state.tokenB_asset_id[i],
+                new_pool_state.token_b_asset_id[i],
+                self.current_pool_state.token_b_asset_id[i],
             );
         }
 
         // Set the new reserves
-        let new_reserve_a = builder.sub(self.current_pool_state.reserveA, amount_a);
-        builder.connect(new_pool_state.reserveA, new_reserve_a);
+        let new_reserve_a = builder.sub(self.current_pool_state.reserve_a, amount_a);
+        builder.connect(new_pool_state.reserve_a, new_reserve_a);
 
-        let new_reserve_b = builder.sub(self.current_pool_state.reserveB, amount_b);
-        builder.connect(new_pool_state.reserveB, new_reserve_b);
+        let new_reserve_b = builder.sub(self.current_pool_state.reserve_b, amount_b);
+        builder.connect(new_pool_state.reserve_b, new_reserve_b);
 
         // Add explicit value conservation checks
         // 1. Verify that new_reserve_a = current_reserve_a - amount_a
-        let expected_new_reserve_a = builder.sub(self.current_pool_state.reserveA, amount_a);
+        let expected_new_reserve_a = builder.sub(self.current_pool_state.reserve_a, amount_a);
         builder.connect(new_reserve_a, expected_new_reserve_a);
 
         // 2. Verify that new_reserve_b = current_reserve_b - amount_b
-        let expected_new_reserve_b = builder.sub(self.current_pool_state.reserveB, amount_b);
+        let expected_new_reserve_b = builder.sub(self.current_pool_state.reserve_b, amount_b);
         builder.connect(new_reserve_b, expected_new_reserve_b);
 
         // 3. Verify that the LP tokens burned match the reduction in total_lp_shares
@@ -185,9 +185,9 @@ impl RemoveLiquidityCircuit {
             self.current_pool_state.total_lp_shares,
         )
         .expect("Failed to calculate lp_ratio");
-        let expected_amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveA)
+        let expected_amount_a = fixed_mul(builder, lp_ratio, self.current_pool_state.reserve_a)
             .expect("Failed to calculate expected_amount_a");
-        let expected_amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserveB)
+        let expected_amount_b = fixed_mul(builder, lp_ratio, self.current_pool_state.reserve_b)
             .expect("Failed to calculate expected_amount_b");
 
         // Allow for a small rounding error due to fixed-point arithmetic
@@ -208,8 +208,8 @@ impl RemoveLiquidityCircuit {
         // The ratio of products should be close to 1
         let old_product = fixed_mul(
             builder,
-            self.current_pool_state.reserveA,
-            self.current_pool_state.reserveB,
+            self.current_pool_state.reserve_a,
+            self.current_pool_state.reserve_b,
         )
         .expect("Failed to calculate old product");
         let new_product = fixed_mul(builder, new_reserve_a, new_reserve_b)
@@ -254,7 +254,7 @@ impl RemoveLiquidityCircuit {
         for i in 0..HASH_SIZE {
             builder.connect(
                 output_utxo_a.asset_id_target[i],
-                self.current_pool_state.tokenA_asset_id[i],
+                self.current_pool_state.token_a_asset_id[i],
             );
         }
 
@@ -276,7 +276,7 @@ impl RemoveLiquidityCircuit {
         for i in 0..HASH_SIZE {
             builder.connect(
                 output_utxo_b.asset_id_target[i],
-                self.current_pool_state.tokenB_asset_id[i],
+                self.current_pool_state.token_b_asset_id[i],
             );
         }
 
@@ -401,27 +401,27 @@ impl RemoveLiquidityCircuit {
         // Set LP share values
         for i in 0..HASH_SIZE {
             if i < input_lp_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     lp_share.owner[i],
                     GoldilocksField::from_canonical_u64(input_lp_owner[i] as u64),
                 );
             } else {
-                pw.set_target(lp_share.owner[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(lp_share.owner[i], GoldilocksField::ZERO);
             }
         }
 
         for i in 0..HASH_SIZE {
             if i < input_lp_pool_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     lp_share.pool_id[i],
                     GoldilocksField::from_canonical_u64(input_lp_pool_id[i] as u64),
                 );
             } else {
-                pw.set_target(lp_share.pool_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(lp_share.pool_id[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             lp_share.amount,
             GoldilocksField::from_canonical_u64(input_lp_amount),
         );
@@ -434,102 +434,102 @@ impl RemoveLiquidityCircuit {
         // Set pool ID
         for i in 0..HASH_SIZE {
             if i < pool_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     current_pool_state.pool_id[i],
                     GoldilocksField::from_canonical_u64(pool_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.pool_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.pool_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set token A ID
         for i in 0..HASH_SIZE {
             if i < token_a_id.len() {
-                pw.set_target(
-                    current_pool_state.tokenA_asset_id[i],
+                let _ = pw.set_target(
+                    current_pool_state.token_a_asset_id[i],
                     GoldilocksField::from_canonical_u64(token_a_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.tokenA_asset_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_a_asset_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set token B ID
         for i in 0..HASH_SIZE {
             if i < token_b_id.len() {
-                pw.set_target(
-                    current_pool_state.tokenB_asset_id[i],
+                let _ = pw.set_target(
+                    current_pool_state.token_b_asset_id[i],
                     GoldilocksField::from_canonical_u64(token_b_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.tokenB_asset_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_b_asset_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set reserves and LP shares
-        pw.set_target(
-            current_pool_state.reserveA,
+        let _ = pw.set_target(
+            current_pool_state.reserve_a,
             GoldilocksField::from_canonical_u64(reserve_a),
         );
-        pw.set_target(
-            current_pool_state.reserveB,
+        let _ = pw.set_target(
+            current_pool_state.reserve_b,
             GoldilocksField::from_canonical_u64(reserve_b),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.total_lp_shares,
             GoldilocksField::from_canonical_u64(total_lp_shares),
         );
 
         // Set transition state
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.has_transitioned,
             GoldilocksField::from_canonical_u64(if has_transitioned { 1 } else { 0 }),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.current_supply,
             GoldilocksField::from_canonical_u64(current_supply),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.target_reserve,
             GoldilocksField::from_canonical_u64(target_reserve),
         );
 
         // Set minimum amounts
         let min_amount_a_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             min_amount_a_target,
             GoldilocksField::from_canonical_u64(min_amount_a),
         );
 
         let min_amount_b_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             min_amount_b_target,
             GoldilocksField::from_canonical_u64(min_amount_b),
         );
 
         // Create and set user public key
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.x,
             GoldilocksField::from_canonical_u64(user_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.y,
             GoldilocksField::from_canonical_u64(user_pk_y),
         );
 
         // Create and set user signature
         let user_signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );
@@ -753,8 +753,8 @@ mod tests {
         let reserve_a = builder.constant(GoldilocksField::from_canonical_u64(10000000)); // 10.0 tokens
         let reserve_b = builder.constant(GoldilocksField::from_canonical_u64(20000000)); // 20.0 tokens
         let total_lp_shares = builder.constant(GoldilocksField::from_canonical_u64(14142135)); // sqrt(10*20) * 10^6
-        builder.connect(current_pool_state.reserveA, reserve_a);
-        builder.connect(current_pool_state.reserveB, reserve_b);
+        builder.connect(current_pool_state.reserve_a, reserve_a);
+        builder.connect(current_pool_state.reserve_b, reserve_b);
         builder.connect(current_pool_state.total_lp_shares, total_lp_shares);
 
         // Set up minimum output amounts that are too high (more than proportional share)
@@ -834,8 +834,8 @@ mod tests {
         let total_lp_shares = builder.constant(GoldilocksField::from_canonical_u64(14142135)); // sqrt(10*20) * 10^6
 
         // Connect the current pool state to the circuit
-        builder.connect(current_pool_state.reserveA, reserve_a);
-        builder.connect(current_pool_state.reserveB, reserve_b);
+        builder.connect(current_pool_state.reserve_a, reserve_a);
+        builder.connect(current_pool_state.reserve_b, reserve_b);
         builder.connect(current_pool_state.total_lp_shares, total_lp_shares);
 
         // Set up LP share amount (10% of total LP shares)
@@ -894,8 +894,8 @@ mod tests {
         let total_lp_shares = builder.constant(GoldilocksField::from_canonical_u64(14142135)); // sqrt(10*20) * 10^6
 
         // Connect the current pool state to the circuit
-        builder.connect(current_pool_state.reserveA, reserve_a);
-        builder.connect(current_pool_state.reserveB, reserve_b);
+        builder.connect(current_pool_state.reserve_a, reserve_a);
+        builder.connect(current_pool_state.reserve_b, reserve_b);
         builder.connect(current_pool_state.total_lp_shares, total_lp_shares);
 
         // Set up LP share amount (10% of total LP shares)

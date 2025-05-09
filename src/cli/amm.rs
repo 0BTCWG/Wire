@@ -132,29 +132,25 @@ pub fn swap_tokens(
     let current_supply = pool_state["current_supply"].as_u64().unwrap_or(0);
     let target_reserve = pool_state["target_reserve"].as_u64().unwrap_or(0);
 
-    // Ensure the input token is one of the pool tokens
-    if asset_id != token_a_asset_id && asset_id != token_b_asset_id {
-        return Err(format!(
-            "Input token asset ID {} does not match either pool token",
-            asset_id_str
-        ));
+    // Convert string asset IDs to numeric values for comparison
+    let token_a_asset_id_str = format!("{:x}", token_a_asset_id);
+    let token_b_asset_id_str = format!("{:x}", token_b_asset_id);
+    
+    // Check if output asset is one of the pool assets
+    if output_asset_id != token_a_asset_id_str && output_asset_id != token_b_asset_id_str {
+        return Err("Output asset must be one of the pool assets".to_string());
     }
 
-    // Ensure the output token is the other pool token
-    if output_asset_id != token_a_asset_id && output_asset_id != token_b_asset_id {
-        return Err(format!(
-            "Output token asset ID {} does not match either pool token",
-            output_asset_id
-        ));
-    }
-
-    // Ensure the input and output tokens are different
-    if asset_id == output_asset_id {
-        return Err("Input and output token asset IDs must be different".to_string());
-    }
-
-    // Convert output asset ID to bytes
-    let _output_asset_id_bytes = output_asset_id.to_be_bytes().to_vec();
+    // Determine input and output assets
+    let _asset_id_str = if output_asset_id == token_a_asset_id_str {
+        token_b_asset_id_str
+    } else {
+        token_a_asset_id_str
+    };
+    
+    // Parse the output asset ID from hex string to bytes
+    let _output_asset_id_bytes = hex::decode(output_asset_id.trim_start_matches("0x"))
+        .map_err(|e| format!("Invalid output asset ID: {}", e))?;
 
     // Example user public key values
     let _user_pk_x = 12345;
@@ -223,7 +219,7 @@ pub fn swap_tokens(
 
     // Create the output UTXO
     let output_utxo = json!({
-        "asset_id": format!("{:x}", output_asset_id),
+        "asset_id": output_asset_id,
         "amount": output_amount,
         "owner": input_utxo["owner"],
         "nullifier": format!("{:x}", rand::random::<u64>()),
@@ -297,12 +293,12 @@ pub fn add_liquidity(
 
     // Extract UTXO values
     let asset_id_a_str = input_utxo_a["asset_id"].as_str().unwrap_or("");
-    let asset_id_a = u64::from_str_radix(asset_id_a_str, 16)
+    let _asset_id_a = u64::from_str_radix(asset_id_a_str, 16)
         .map_err(|e| format!("Invalid asset ID A: {}", e))?;
     let amount_a = input_utxo_a["amount"].as_u64().unwrap_or(0);
 
     let asset_id_b_str = input_utxo_b["asset_id"].as_str().unwrap_or("");
-    let asset_id_b = u64::from_str_radix(asset_id_b_str, 16)
+    let _asset_id_b = u64::from_str_radix(asset_id_b_str, 16)
         .map_err(|e| format!("Invalid asset ID B: {}", e))?;
     let amount_b = input_utxo_b["amount"].as_u64().unwrap_or(0);
 
@@ -317,11 +313,15 @@ pub fn add_liquidity(
     let reserve_b = pool_state["reserve_b"].as_u64().unwrap_or(0);
     let total_lp_shares = pool_state["total_lp_shares"].as_u64().unwrap_or(0);
 
+    // Convert string asset IDs to numeric values for comparison
+    let token_a_asset_id_str = format!("{:x}", token_a_asset_id);
+    let token_b_asset_id_str = format!("{:x}", token_b_asset_id);
+    
     // Ensure the input tokens match the pool tokens
     let (input_a_is_token_a, input_b_is_token_b) =
-        if asset_id_a == token_a_asset_id && asset_id_b == token_b_asset_id {
+        if asset_id_a_str == token_a_asset_id_str && asset_id_b_str == token_b_asset_id_str {
             (true, true)
-        } else if asset_id_a == token_b_asset_id && asset_id_b == token_a_asset_id {
+        } else if asset_id_a_str == token_b_asset_id_str && asset_id_b_str == token_a_asset_id_str {
             (false, false)
         } else {
             return Err("Input token asset IDs do not match pool tokens".to_string());
@@ -519,4 +519,57 @@ pub fn remove_liquidity(
     info!("Result saved to {}", output_path);
 
     Ok(())
+}
+
+/// Execute the swap command
+pub fn execute_swap_command(matches: &clap::ArgMatches) -> wire_lib::errors::WireResult<()> {
+    let input_utxo = matches.get_one::<String>("input-utxo").unwrap();
+    let pool_id = matches.get_one::<String>("pool-id").unwrap();
+    let min_output_amount = matches.get_one::<String>("min-output-amount").unwrap();
+    let output_asset_id = matches.get_one::<String>("output-asset-id").unwrap();
+    let output_path = matches.get_one::<String>("output-path").unwrap();
+    
+    // Convert min_output_amount to u64
+    let min_output_amount_u64 = min_output_amount.parse::<u64>()
+        .map_err(|_| wire_lib::errors::WireError::GenericError("Invalid min output amount".to_string()))?;
+    
+    // Call the swap_tokens function
+    swap_tokens(input_utxo, pool_id, output_asset_id, min_output_amount_u64, output_path)
+        .map_err(|e| wire_lib::errors::WireError::GenericError(e))
+}
+
+/// Execute the add liquidity command
+pub fn execute_add_liquidity_command(matches: &clap::ArgMatches) -> wire_lib::errors::WireResult<()> {
+    let input_utxo_a = matches.get_one::<String>("input-utxo-a").unwrap();
+    let input_utxo_b = matches.get_one::<String>("input-utxo-b").unwrap();
+    let pool_id = matches.get_one::<String>("pool-id").unwrap();
+    let min_lp_tokens = matches.get_one::<String>("min-lp-tokens").unwrap();
+    let output_path = matches.get_one::<String>("output-path").unwrap();
+    
+    // Convert min_lp_tokens to u64
+    let min_lp_tokens_u64 = min_lp_tokens.parse::<u64>()
+        .map_err(|_| wire_lib::errors::WireError::GenericError("Invalid min LP tokens".to_string()))?;
+    
+    // Call the add_liquidity function
+    add_liquidity(input_utxo_a, input_utxo_b, pool_id, min_lp_tokens_u64, output_path)
+        .map_err(|e| wire_lib::errors::WireError::GenericError(e))
+}
+
+/// Execute the remove liquidity command
+pub fn execute_remove_liquidity_command(matches: &clap::ArgMatches) -> wire_lib::errors::WireResult<()> {
+    let lp_share = matches.get_one::<String>("lp-share").unwrap();
+    let pool_id = matches.get_one::<String>("pool-id").unwrap();
+    let min_amount_a = matches.get_one::<String>("min-amount-a").unwrap();
+    let min_amount_b = matches.get_one::<String>("min-amount-b").unwrap();
+    let output_path = matches.get_one::<String>("output-path").unwrap();
+    
+    // Convert min amounts to u64
+    let min_amount_a_u64 = min_amount_a.parse::<u64>()
+        .map_err(|_| wire_lib::errors::WireError::GenericError("Invalid min amount A".to_string()))?;
+    let min_amount_b_u64 = min_amount_b.parse::<u64>()
+        .map_err(|_| wire_lib::errors::WireError::GenericError("Invalid min amount B".to_string()))?;
+    
+    // Call the remove_liquidity function
+    remove_liquidity(lp_share, pool_id, min_amount_a_u64, min_amount_b_u64, output_path)
+        .map_err(|e| wire_lib::errors::WireError::GenericError(e))
 }

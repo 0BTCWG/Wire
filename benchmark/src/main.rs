@@ -126,8 +126,8 @@ fn benchmark_simple_circuit() -> BenchmarkResult {
 
     // Create witness
     let mut pw = PartialWitness::new();
-    pw.set_target(x, F::from_canonical_u64(2));
-    pw.set_target(y, F::from_canonical_u64(3));
+    let _ = pw.set_target(x, F::from_canonical_u64(2));
+    let _ = pw.set_target(y, F::from_canonical_u64(3));
 
     // Generate proof
     let start = Instant::now();
@@ -172,7 +172,7 @@ fn benchmark_hash_operations() -> BenchmarkResult {
 
     // Create witness
     let mut pw = PartialWitness::new();
-    pw.set_target(input, F::from_canonical_u64(42));
+    let _ = pw.set_target(input, F::from_canonical_u64(42));
 
     // Generate proof
     let start = Instant::now();
@@ -264,25 +264,25 @@ fn benchmark_transfer_circuit() -> BenchmarkResult {
 
     // Set input UTXO values
     for i in 0..32 {
-        pw.set_target(input_pubkey_hash[i], F::from_canonical_u64(i as u64));
-        pw.set_target(input_asset_id[i], F::from_canonical_u64((i + 32) as u64));
-        pw.set_target(
+        let _ = pw.set_target(input_pubkey_hash[i], F::from_canonical_u64(i as u64));
+        let _ = pw.set_target(input_asset_id[i], F::from_canonical_u64((i + 32) as u64));
+        let _ = pw.set_target(
             output_pubkey_hash[i],
             F::from_canonical_u64((i + 64) as u64),
         );
-        pw.set_target(output_asset_id[i], F::from_canonical_u64((i + 32) as u64));
+        let _ = pw.set_target(output_asset_id[i], F::from_canonical_u64((i + 32) as u64));
         // Same asset ID
     }
 
-    pw.set_target(input_amount, F::from_canonical_u64(1000));
-    pw.set_target(input_salt, F::from_canonical_u64(12345));
-    pw.set_target(output_amount, F::from_canonical_u64(900)); // Transfer amount minus fee
-    pw.set_target(output_salt, F::from_canonical_u64(67890));
+    let _ = pw.set_target(input_amount, F::from_canonical_u64(1000));
+    let _ = pw.set_target(input_salt, F::from_canonical_u64(12345));
+    let _ = pw.set_target(output_amount, F::from_canonical_u64(900)); // Transfer amount minus fee
+    let _ = pw.set_target(output_salt, F::from_canonical_u64(67890));
 
     // Set signature values
-    pw.set_target(sig_r_x, F::from_canonical_u64(1));
-    pw.set_target(sig_r_y, F::from_canonical_u64(2));
-    pw.set_target(sig_s, F::from_canonical_u64(3));
+    let _ = pw.set_target(sig_r_x, F::from_canonical_u64(1));
+    let _ = pw.set_target(sig_r_y, F::from_canonical_u64(2));
+    let _ = pw.set_target(sig_s, F::from_canonical_u64(3));
 
     // Generate proof
     let start = Instant::now();

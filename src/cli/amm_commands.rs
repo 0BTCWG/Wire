@@ -1,150 +1,122 @@
 // AMM CLI Commands for the 0BTC Wire system
 // This file provides CLI commands for the AMM features
 
-use clap::{App, Arg, ArgMatches, SubCommand};
+use clap::{Arg, ArgMatches, Command as App, Subcommand};
 use std::path::PathBuf;
 
-use crate::circuits::swap::SwapCircuit;
-use crate::errors::WireResult;
+use wire_lib::circuits::swap::SwapCircuit;
+use wire_lib::errors::{WireError, WireResult};
 
 /// Add AMM subcommands to the CLI
-pub fn add_amm_subcommands(app: App<'static, 'static>) -> App<'static, 'static> {
+pub fn add_amm_subcommands(app: App) -> App {
     app.subcommand(
-        SubCommand::with_name("amm")
+        App::new("amm")
             .about("Automated Market Maker (AMM) operations")
             .subcommand(
-                SubCommand::with_name("configure-fees")
+                App::new("configure-fees")
                     .about("Configure AMM fees")
                     .arg(
-                        Arg::with_name("lp-fee")
-                            .long("lp-fee")
-                            .value_name("FEE_PERCENTAGE")
-                            .help("LP fee percentage (e.g., 0.3% = 3000)")
-                            .takes_value(true)
-                            .required(true),
-                    )
-                    .arg(
-                        Arg::with_name("protocol-fee")
-                            .long("protocol-fee")
-                            .value_name("FEE_PERCENTAGE")
-                            .help("Protocol fee percentage (e.g., 0.06% = 600)")
-                            .takes_value(true)
-                            .required(true),
-                    )
-                    .arg(
-                        Arg::with_name("fee-reservoir")
-                            .long("fee-reservoir")
-                            .value_name("ADDRESS_HASH")
-                            .help("Fee reservoir address hash")
-                            .takes_value(true)
-                            .required(true),
-                    ),
-            )
-            .subcommand(
-                SubCommand::with_name("swap")
-                    .about("Swap tokens in an AMM pool")
-                    .arg(
-                        Arg::with_name("input-utxo")
-                            .long("input-utxo")
-                            .value_name("UTXO_ID")
-                            .help("Input UTXO ID")
-                            .takes_value(true)
-                            .required(true),
-                    )
-                    .arg(
-                        Arg::with_name("pool-id")
+                        Arg::new("pool-id")
                             .long("pool-id")
                             .value_name("POOL_ID")
-                            .help("Pool ID")
-                            .takes_value(true)
-                            .required(true),
+                            .help("Pool ID to configure fees for")
+                            .required(true)
                     )
                     .arg(
-                        Arg::with_name("output-asset")
-                            .long("output-asset")
-                            .value_name("ASSET_ID")
-                            .help("Output asset ID")
-                            .takes_value(true)
-                            .required(true),
+                        Arg::new("lp-fee-bps")
+                            .long("lp-fee-bps")
+                            .value_name("BPS")
+                            .help("LP fee in basis points (e.g., 30 for 0.3%)")
+                            .required(true)
                     )
                     .arg(
-                        Arg::with_name("min-output")
-                            .long("min-output")
-                            .value_name("AMOUNT")
-                            .help("Minimum output amount")
-                            .takes_value(true)
-                            .required(true),
+                        Arg::new("protocol-fee-bps")
+                            .long("protocol-fee-bps")
+                            .value_name("BPS")
+                            .help("Protocol fee in basis points (e.g., 5 for 0.05%)")
+                            .required(true)
                     )
                     .arg(
-                        Arg::with_name("key-path")
+                        Arg::new("key-path")
                             .long("key-path")
                             .value_name("PATH")
                             .help("Path to the key file")
-                            .takes_value(true)
-                            .required(true),
-                    ),
+                            .required(true)
+                    )
             )
             .subcommand(
-                SubCommand::with_name("add-liquidity")
-                    .about("Add liquidity to an AMM pool")
-                    // Add arguments for add-liquidity
+                App::new("swap")
+                    .about("Perform a token swap")
+                    .arg(
+                        Arg::new("input-utxo")
+                            .long("input-utxo")
+                            .value_name("UTXO_ID")
+                            .help("Input UTXO ID")
+                            .required(true)
+                    )
+                    .arg(
+                        Arg::new("pool-id")
+                            .long("pool-id")
+                            .value_name("POOL_ID")
+                            .help("Pool ID to swap in")
+                            .required(true)
+                    )
+                    .arg(
+                        Arg::new("min-output-amount")
+                            .long("min-output-amount")
+                            .value_name("AMOUNT")
+                            .help("Minimum output amount (slippage protection)")
+                            .required(true)
+                    )
+                    .arg(
+                        Arg::new("key-path")
+                            .long("key-path")
+                            .value_name("PATH")
+                            .help("Path to the key file")
+                            .required(true)
+                    )
             )
             .subcommand(
-                SubCommand::with_name("remove-liquidity")
-                    .about("Remove liquidity from an AMM pool")
-                    // Add arguments for remove-liquidity
+                App::new("add-liquidity")
+                    .about("Add liquidity to a pool")
+                    // TODO: Add arguments
+            )
+            .subcommand(
+                App::new("remove-liquidity")
+                    .about("Remove liquidity from a pool")
+                    // TODO: Add arguments
             ),
     )
+}
+
+/// Execute AMM subcommands
+pub fn execute_amm_command(matches: &ArgMatches) -> WireResult<()> {
+    match matches.subcommand() {
+        Some(("swap", sub_matches)) => {
+            crate::cli::amm::execute_swap_command(sub_matches)
+        }
+        Some(("add-liquidity", sub_matches)) => {
+            crate::cli::amm::execute_add_liquidity_command(sub_matches)
+        }
+        Some(("remove-liquidity", sub_matches)) => {
+            crate::cli::amm::execute_remove_liquidity_command(sub_matches)
+        }
+        _ => Err(WireError::GenericError("Unknown AMM subcommand".to_string())),
+    }
 }
 
 /// Handle AMM subcommands
 pub fn handle_amm_command(matches: &ArgMatches) -> WireResult<()> {
     match matches.subcommand() {
-        ("configure-fees", Some(sub_matches)) => {
-            let lp_fee = sub_matches.value_of("lp-fee").unwrap();
-            let protocol_fee = sub_matches.value_of("protocol-fee").unwrap();
-            let fee_reservoir = sub_matches.value_of("fee-reservoir").unwrap();
-            
-            println!("Configuring AMM fees:");
-            println!("LP fee: {}%", lp_fee.parse::<u64>().unwrap() as f64 / 10000.0);
-            println!("Protocol fee: {}%", protocol_fee.parse::<u64>().unwrap() as f64 / 10000.0);
-            println!("Fee reservoir address: {}", fee_reservoir);
-            
-            // TODO: Implement actual fee configuration
-            
-            Ok(())
-        },
-        ("swap", Some(sub_matches)) => {
-            let input_utxo = sub_matches.value_of("input-utxo").unwrap();
-            let pool_id = sub_matches.value_of("pool-id").unwrap();
-            let output_asset = sub_matches.value_of("output-asset").unwrap();
-            let min_output = sub_matches.value_of("min-output").unwrap();
-            let key_path = sub_matches.value_of("key-path").unwrap();
-            
-            println!("Swapping tokens:");
-            println!("Input UTXO: {}", input_utxo);
-            println!("Pool ID: {}", pool_id);
-            println!("Output asset: {}", output_asset);
-            println!("Minimum output: {}", min_output);
-            println!("Key path: {}", key_path);
-            
-            // TODO: Implement actual swap operation
-            
-            Ok(())
-        },
-        ("add-liquidity", Some(_sub_matches)) => {
-            // TODO: Implement add-liquidity command
-            println!("Adding liquidity to pool");
-            Ok(())
-        },
-        ("remove-liquidity", Some(_sub_matches)) => {
-            // TODO: Implement remove-liquidity command
-            println!("Removing liquidity from pool");
-            Ok(())
-        },
-        _ => {
-            println!("Unknown AMM command");
-            Ok(())
+        Some(("swap", sub_matches)) => {
+            crate::cli::amm::execute_swap_command(sub_matches)
         }
+        Some(("add-liquidity", sub_matches)) => {
+            crate::cli::amm::execute_add_liquidity_command(sub_matches)
+        }
+        Some(("remove-liquidity", sub_matches)) => {
+            crate::cli::amm::execute_remove_liquidity_command(sub_matches)
+        }
+        _ => Err(WireError::GenericError("Unknown AMM subcommand".to_string())),
     }
 }

@@ -109,7 +109,7 @@ impl AddLiquidityCircuit {
         let is_token_a_correct = compare_vectors(
             builder,
             &self.input_utxo_a.asset_id_target,
-            &self.current_pool_state.tokenA_asset_id,
+            &self.current_pool_state.token_a_asset_id,
         );
         let one = builder.one();
         let zero = builder.zero();
@@ -120,7 +120,7 @@ impl AddLiquidityCircuit {
         let is_token_b_correct = compare_vectors(
             builder,
             &self.input_utxo_b.asset_id_target,
-            &self.current_pool_state.tokenB_asset_id,
+            &self.current_pool_state.token_b_asset_id,
         );
         let one = builder.one();
         let zero = builder.zero();
@@ -159,7 +159,7 @@ impl AddLiquidityCircuit {
         let lp_tokens = fixed_div(
             builder,
             amount_a_mul_shares,
-            self.current_pool_state.reserveA,
+            self.current_pool_state.reserve_a,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
 
@@ -211,32 +211,32 @@ impl AddLiquidityCircuit {
                 self.current_pool_state.pool_id[i],
             );
             builder.connect(
-                new_pool_state.tokenA_asset_id[i],
-                self.current_pool_state.tokenA_asset_id[i],
+                new_pool_state.token_a_asset_id[i],
+                self.current_pool_state.token_a_asset_id[i],
             );
             builder.connect(
-                new_pool_state.tokenB_asset_id[i],
-                self.current_pool_state.tokenB_asset_id[i],
+                new_pool_state.token_b_asset_id[i],
+                self.current_pool_state.token_b_asset_id[i],
             );
         }
 
         // Set the new reserves
         let new_reserve_a = builder.add(
-            self.current_pool_state.reserveA,
+            self.current_pool_state.reserve_a,
             self.input_utxo_a.amount_target,
         );
-        builder.connect(new_pool_state.reserveA, new_reserve_a);
+        builder.connect(new_pool_state.reserve_a, new_reserve_a);
 
         let new_reserve_b = builder.add(
-            self.current_pool_state.reserveB,
+            self.current_pool_state.reserve_b,
             self.input_utxo_b.amount_target,
         );
-        builder.connect(new_pool_state.reserveB, new_reserve_b);
+        builder.connect(new_pool_state.reserve_b, new_reserve_b);
 
         // Add explicit value conservation checks
         // 1. Verify that new_reserve_a = current_reserve_a + input_amount_a
         let expected_new_reserve_a = builder.add(
-            self.current_pool_state.reserveA,
+            self.current_pool_state.reserve_a,
             self.input_utxo_a.amount_target,
         );
         let new_reserve_a_equal = builder.is_equal(new_reserve_a, expected_new_reserve_a);
@@ -244,7 +244,7 @@ impl AddLiquidityCircuit {
 
         // 2. Verify that new_reserve_b = current_reserve_b + input_amount_b
         let expected_new_reserve_b = builder.add(
-            self.current_pool_state.reserveB,
+            self.current_pool_state.reserve_b,
             self.input_utxo_b.amount_target,
         );
         let new_reserve_b_equal = builder.is_equal(new_reserve_b, expected_new_reserve_b);
@@ -257,8 +257,8 @@ impl AddLiquidityCircuit {
         // Calculate the product of reserves before and after adding liquidity
         let _old_product = fixed_mul(
             builder,
-            self.current_pool_state.reserveA,
-            self.current_pool_state.reserveB,
+            self.current_pool_state.reserve_a,
+            self.current_pool_state.reserve_b,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
 
@@ -290,13 +290,13 @@ impl AddLiquidityCircuit {
         let ratio_a = fixed_div(
             builder,
             self.input_utxo_a.amount_target,
-            self.current_pool_state.reserveA,
+            self.current_pool_state.reserve_a,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
         let ratio_b = fixed_div(
             builder,
             self.input_utxo_b.amount_target,
-            self.current_pool_state.reserveB,
+            self.current_pool_state.reserve_b,
         )
         .map_err(|e| WireError::CircuitError(CircuitError::ArithmeticError(e.to_string())))?;
 
@@ -433,8 +433,8 @@ impl AddLiquidityCircuit {
         pool_id: &[u8],
         token_a_asset_id: &[u8],
         token_b_asset_id: &[u8],
-        reserveA: u64,
-        reserveB: u64,
+        reserve_a: u64,
+        reserve_b: u64,
         total_lp_shares: u64,
         has_transitioned: bool,
         current_supply: u64,
@@ -464,188 +464,180 @@ impl AddLiquidityCircuit {
         let input_utxo_a = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
 
         // Set input UTXO A values
-        for i in 0..HASH_SIZE {
+        for i in 0..input_utxo_a_owner.len() {
             if i < input_utxo_a_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_a.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_a_owner[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_a.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
             }
         }
 
-        for i in 0..HASH_SIZE {
+        for i in 0..32 {
             if i < input_utxo_a_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_a.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_a_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(input_utxo_a.asset_id_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(input_utxo_a.asset_id_target[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo_a.amount_target,
             GoldilocksField::from_canonical_u64(input_utxo_a_amount),
         );
 
-        for i in 0..HASH_SIZE {
-            if i < input_utxo_a_salt.len() {
-                pw.set_target(
-                    input_utxo_a.salt_target[i],
-                    GoldilocksField::from_canonical_u64(input_utxo_a_salt[i] as u64),
-                );
-            } else {
-                pw.set_target(input_utxo_a.salt_target[i], GoldilocksField::ZERO);
-            }
+        for i in 0..input_utxo_a_salt.len() {
+            let _ = pw.set_target(
+                input_utxo_a.salt_target[i],
+                GoldilocksField::from_canonical_u64(input_utxo_a_salt[i] as u64),
+            );
         }
 
         // Create input UTXO B target
         let input_utxo_b = UTXOTarget::add_virtual(&mut builder, HASH_SIZE);
 
         // Set input UTXO B values
-        for i in 0..HASH_SIZE {
+        for i in 0..input_utxo_b_owner.len() {
             if i < input_utxo_b_owner.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_b.owner_pubkey_hash_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_b_owner[i] as u64),
                 );
             } else {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_b.owner_pubkey_hash_target[i],
                     GoldilocksField::ZERO,
                 );
             }
         }
 
-        for i in 0..HASH_SIZE {
+        for i in 0..32 {
             if i < input_utxo_b_asset_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     input_utxo_b.asset_id_target[i],
                     GoldilocksField::from_canonical_u64(input_utxo_b_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(input_utxo_b.asset_id_target[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(input_utxo_b.asset_id_target[i], GoldilocksField::ZERO);
             }
         }
 
-        pw.set_target(
+        let _ = pw.set_target(
             input_utxo_b.amount_target,
             GoldilocksField::from_canonical_u64(input_utxo_b_amount),
         );
 
-        for i in 0..HASH_SIZE {
-            if i < input_utxo_b_salt.len() {
-                pw.set_target(
-                    input_utxo_b.salt_target[i],
-                    GoldilocksField::from_canonical_u64(input_utxo_b_salt[i] as u64),
-                );
-            } else {
-                pw.set_target(input_utxo_b.salt_target[i], GoldilocksField::ZERO);
-            }
+        for i in 0..input_utxo_b_salt.len() {
+            let _ = pw.set_target(
+                input_utxo_b.salt_target[i],
+                GoldilocksField::from_canonical_u64(input_utxo_b_salt[i] as u64),
+            );
         }
 
         // Create and set current pool state
         let current_pool_state = PoolStateTarget::new(&mut builder);
 
         // Set pool ID
-        for i in 0..HASH_SIZE {
+        for i in 0..pool_id.len() {
             if i < pool_id.len() {
-                pw.set_target(
+                let _ = pw.set_target(
                     current_pool_state.pool_id[i],
                     GoldilocksField::from_canonical_u64(pool_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.pool_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.pool_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set token A ID
-        for i in 0..HASH_SIZE {
+        for i in 0..token_a_asset_id.len() {
             if i < token_a_asset_id.len() {
-                pw.set_target(
-                    current_pool_state.tokenA_asset_id[i],
+                let _ = pw.set_target(
+                    current_pool_state.token_a_asset_id[i],
                     GoldilocksField::from_canonical_u64(token_a_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.tokenA_asset_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_a_asset_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set token B ID
-        for i in 0..HASH_SIZE {
+        for i in 0..token_b_asset_id.len() {
             if i < token_b_asset_id.len() {
-                pw.set_target(
-                    current_pool_state.tokenB_asset_id[i],
+                let _ = pw.set_target(
+                    current_pool_state.token_b_asset_id[i],
                     GoldilocksField::from_canonical_u64(token_b_asset_id[i] as u64),
                 );
             } else {
-                pw.set_target(current_pool_state.tokenB_asset_id[i], GoldilocksField::ZERO);
+                let _ = pw.set_target(current_pool_state.token_b_asset_id[i], GoldilocksField::ZERO);
             }
         }
 
         // Set reserves and LP shares
-        pw.set_target(
-            current_pool_state.reserveA,
-            GoldilocksField::from_canonical_u64(reserveA),
+        let _ = pw.set_target(
+            current_pool_state.reserve_a,
+            GoldilocksField::from_canonical_u64(reserve_a),
         );
-        pw.set_target(
-            current_pool_state.reserveB,
-            GoldilocksField::from_canonical_u64(reserveB),
+        let _ = pw.set_target(
+            current_pool_state.reserve_b,
+            GoldilocksField::from_canonical_u64(reserve_b),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.total_lp_shares,
             GoldilocksField::from_canonical_u64(total_lp_shares),
         );
 
         // Set transition state
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.has_transitioned,
             GoldilocksField::from_canonical_u64(if has_transitioned { 1 } else { 0 }),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.current_supply,
             GoldilocksField::from_canonical_u64(current_supply),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             current_pool_state.target_reserve,
             GoldilocksField::from_canonical_u64(target_reserve),
         );
 
         // Set minimum LP tokens
         let min_lp_tokens_target = builder.add_virtual_target();
-        pw.set_target(
+        let _ = pw.set_target(
             min_lp_tokens_target,
             GoldilocksField::from_canonical_u64(min_lp_tokens),
         );
 
         // Create and set user public key
         let user_pk = PublicKeyTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.x,
             GoldilocksField::from_canonical_u64(user_pk_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_pk.point.y,
             GoldilocksField::from_canonical_u64(user_pk_y),
         );
 
         // Create and set user signature
         let user_signature = SignatureTarget::add_virtual(&mut builder);
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.x,
             GoldilocksField::from_canonical_u64(signature_r_x),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.r_point.y,
             GoldilocksField::from_canonical_u64(signature_r_y),
         );
-        pw.set_target(
+        let _ = pw.set_target(
             user_signature.s_scalar,
             GoldilocksField::from_canonical_u64(signature_s),
         );
@@ -863,11 +855,11 @@ mod tests {
 
         // Verify that the new pool state is updated correctly
         assert!(
-            _new_pool_state.reserveA != builder.zero(),
+            _new_pool_state.reserve_a != builder.zero(),
             "New pool state reserve A should not be zero"
         );
         assert!(
-            _new_pool_state.reserveB != builder.zero(),
+            _new_pool_state.reserve_b != builder.zero(),
             "New pool state reserve B should not be zero"
         );
         assert!(
@@ -907,14 +899,14 @@ mod tests {
         let total_lp_shares = builder.constant(GoldilocksField::from_canonical_u64(1000000)); // 1.0 LP token
 
         // Connect the current pool state to the circuit
-        builder.connect(current_pool_state.reserveA, reserve_a);
-        builder.connect(current_pool_state.reserveB, reserve_b);
+        builder.connect(current_pool_state.reserve_a, reserve_a);
+        builder.connect(current_pool_state.reserve_b, reserve_b);
         builder.connect(current_pool_state.total_lp_shares, total_lp_shares);
 
         // Set the token IDs in the pool state
         for i in 0..HASH_SIZE {
-            builder.connect(current_pool_state.tokenA_asset_id[i], token_a_id[i]);
-            builder.connect(current_pool_state.tokenB_asset_id[i], token_b_id[i]);
+            builder.connect(current_pool_state.token_a_asset_id[i], token_a_id[i]);
+            builder.connect(current_pool_state.token_b_asset_id[i], token_b_id[i]);
         }
 
         // Set up the minimum LP tokens
