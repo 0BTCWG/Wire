@@ -1,7 +1,10 @@
 use wire_lib::circuits::transfer::TransferCircuit;
 use wire_lib::circuits::wrapped_asset_mint::WrappedAssetMintCircuit;
 use wire_lib::circuits::wrapped_asset_burn::WrappedAssetBurnCircuit;
+use wire_lib::core::SerializableProof;
 use wire_lib::errors::WireError;
+use wire_lib::errors::ProofError;
+use wire_lib::errors::WireResult;
 
 // Import HASH_SIZE directly
 const HASH_SIZE: usize = 32;
@@ -9,6 +12,10 @@ const HASH_SIZE: usize = 32;
 #[cfg(test)]
 mod real_proof_tests {
     use super::*; // Imports items from the parent module (real_proof_tests)
+    use plonky2::iop::witness::PartialWitness;
+    use plonky2::iop::witness::WitnessWrite;
+    use plonky2_field::goldilocks_field::GoldilocksField;
+    use plonky2_field::types::Field;
 
     #[test]
     fn test_wrapped_asset_mint_real_proof() {
@@ -472,7 +479,7 @@ mod real_proof_tests {
         println!("DEBUG: Input UTXO size: {} bytes", serialized_input_utxo.len());
         assert_eq!(serialized_input_utxo.len(), 128, "Input UTXO should be 128 bytes");
         
-        let serialized_input_utxos = vec![serialized_input_utxo];
+        let _serialized_input_utxos = vec![serialized_input_utxo];
 
         // Recipient: Gets 1000 tokens (same as input, no fee)
         let recipient_pk_hash = vec![1u8; HASH_SIZE]; // Use same owner for simplicity
@@ -480,7 +487,7 @@ mod real_proof_tests {
         let output_amounts = vec![1000u64]; // Same as input amount, no fee
 
         // Sender Info - create with proper format for populate_witness
-        let sender_sk = 1u64;
+        let _sender_sk = 1u64;
         
         // FIX 2: Create sender public key with proper format (64 bytes total)
         // 32 bytes for x-coordinate and 32 bytes for y-coordinate
@@ -560,28 +567,30 @@ mod real_proof_tests {
         // Fee Parameters
         let fee_amount = 0u64;
         let fee_reservoir_address_hash = vec![0u8; HASH_SIZE];
-        let nonce = 0u64;
+        let _nonce = 0u64;
 
         println!("DEBUG: Data preparation complete with format fixes");
         println!("DEBUG: UTXO format: owner_hash(32) + asset_id(32) + amount(32) + salt(32) = 128 bytes");
         println!("DEBUG: PK format: x(32) + y(32) = 64 bytes");
         println!("DEBUG: Signature format: r_x(32) + r_y(32) + s(32) = 96 bytes");
         
-        // Now try to generate a proof with the fixed formats
-        println!("DEBUG: Starting proof generation with format fixes");
+        // Now try to generate a real proof with our fixed formats and improved circuit
+        println!("DEBUG: Attempting to generate a real proof with format fixes");
+        
+        // Use the static_generate_proof method to create a real proof
         let result = TransferCircuit::static_generate_proof(
-            serialized_input_utxos,
+            _serialized_input_utxos,
             recipient_pk_hashes,
             output_amounts,
-            sender_sk,
+            _sender_sk,
             sender_pk,
             sender_sig,
             serialized_fee_utxo,
             fee_amount,
             fee_reservoir_address_hash,
-            nonce,
+            _nonce,
         );
-
+        
         match &result {
             Ok(_) => {
                 println!("DEBUG: Transfer proof generation succeeded!");
